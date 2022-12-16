@@ -15,6 +15,7 @@ typedef struct {
 	double mass;
 } Entity;
 
+
 //Read file and generate an array of Entity
 uint get_entities(char filename[], Entity** ents) {
 	FILE* f = fopen(filename, 'r');
@@ -58,4 +59,11 @@ uint get_entities(char filename[], Entity** ents) {
     *ents=ret;
 	fclose(f);
     return size;
+}
+
+int main(int argc, char* argv[]){
+    if(argc!=2){
+        fprintf(stderr, "Usage: %s filename\n", argv[0]);
+    }
+
 }
