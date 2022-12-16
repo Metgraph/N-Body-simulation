@@ -18,21 +18,24 @@ typedef struct {
 
 //Read file and generate an array of Entity
 uint get_entities(char filename[], Entity** ents) {
+	Entity e_buff;
+	int status;
+    uint ret_size;
+    uint size;
+    Entity* ret;
 	FILE* f = fopen(filename, 'r');
 
 	// Check if file has been open correctly, if not return NULL
 	if (!f) {
 		fprintf(stderr, "Error opening file '%s'\n", filename);
-		return NULL;
+		return 0;
 	}
 
 	// TODO Check for error in allocation
-	Entity* ret = (Entity*)malloc(1 * sizeof(Entity));
+	ret = (Entity*)malloc(1 * sizeof(Entity));
 
-	Entity e_buff;
-	int status;
-	uint size = 0;
-	uint ret_size = 1;
+	size = 0;
+	ret_size = 1;
 	// fscanf return the number of input items successfully matched and assigned
 	while ((status =
 				fscanf(f, "%lf, %lf, %lf, %lf, %lf, %lf, %lf\n", &e_buff.pos.x,
@@ -53,7 +56,7 @@ uint get_entities(char filename[], Entity** ents) {
 		fprintf(stderr, "Error reading file '%s': file is not well formed\n",
 				filename);
 		fclose(f);
-		return NULL;
+		return 0;
 	}
     
     *ents=ret;
@@ -62,8 +65,10 @@ uint get_entities(char filename[], Entity** ents) {
 }
 
 int main(int argc, char* argv[]){
+
     if(argc!=2){
         fprintf(stderr, "Usage: %s filename\n", argv[0]);
     }
+
 
 }
