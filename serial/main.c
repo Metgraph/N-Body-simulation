@@ -15,6 +15,13 @@ typedef struct {
 	double mass;
 } Entity;
 
+//Sum vectors
+RVec3 vec3_sum(RVec3 *v1, RVec3 *v2){
+    RVec3 sum={v1->x+v2->x,
+                v1->y+v2->y,
+                v1->z+v2->z};
+    return sum;
+}
 
 //Read file and generate an array of Entity
 uint get_entities(char filename[], Entity** ents) {
@@ -65,11 +72,11 @@ uint get_entities(char filename[], Entity** ents) {
 }
 
 int main(int argc, char* argv[]){
-    uint n_ents;
+    uint ents_sz;
     Entity *ents;
     if(argc!=2){
         fprintf(stderr, "Usage: %s filename\n", argv[0]);
     }
-    n_ents=get_entities(argv[1], &ents);
+    ents_sz=get_entities(argv[1], &ents);
     
 }
