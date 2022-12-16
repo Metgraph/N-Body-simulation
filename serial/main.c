@@ -23,7 +23,7 @@ uint get_entities(char filename[], Entity** ents) {
     uint ret_size;
     uint size;
     Entity* ret;
-	FILE* f = fopen(filename, 'r');
+	FILE* f = fopen(filename, "r");
 
 	// Check if file has been open correctly, if not return NULL
 	if (!f) {
@@ -42,10 +42,10 @@ uint get_entities(char filename[], Entity** ents) {
 					   &e_buff.pos.y, &e_buff.pos.z, &e_buff.vec.x,
 					   &e_buff.vec.y, &e_buff.vec.z, &e_buff.mass)) == 7) {
 		size++;
-		if (ret_size <= size) {
+		if (ret_size < size) {
 			// TODO Check for error in allocation
 			ret_size *= 2;
-			ret = (Entity*)realloc((void*)ret, ret_size);
+			ret = (Entity*)realloc((void*)ret, ret_size*sizeof(Entity));
 		}
 		// Save value in first free location
 		ret[size - 1] = e_buff;
@@ -65,10 +65,11 @@ uint get_entities(char filename[], Entity** ents) {
 }
 
 int main(int argc, char* argv[]){
-
+    uint n_ents;
+    Entity *ents;
     if(argc!=2){
         fprintf(stderr, "Usage: %s filename\n", argv[0]);
     }
-
-
+    n_ents=get_entities(argv[1], &ents);
+    
 }
