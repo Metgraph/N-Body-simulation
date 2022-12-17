@@ -14,7 +14,7 @@ typedef struct
 typedef struct
 {
 	RVec3 pos;
-	RVec3 vec;
+	RVec3 vel;
 	double mass;
 } Entity;
 
@@ -43,8 +43,8 @@ uint get_entities(char filename[], Entity **ents)
 	// fscanf return the number of input items successfully matched and assigned
 	while ((status =
 				fscanf(f, "%lf, %lf, %lf, %lf, %lf, %lf, %lf\n", &e_buff.pos.x,
-					   &e_buff.pos.y, &e_buff.pos.z, &e_buff.vec.x,
-					   &e_buff.vec.y, &e_buff.vec.z, &e_buff.mass)) == 7)
+					   &e_buff.pos.y, &e_buff.pos.z, &e_buff.vel.x,
+					   &e_buff.vel.y, &e_buff.vel.z, &e_buff.mass)) == 7)
 	{
 		size++;
 		if (ret_size < size)
@@ -104,16 +104,16 @@ void propagation(Entity ents[], uint ents_sz, size_t t_start, size_t t_end, size
 					a_g.z = unit_vec3.z * acceleration;
 				}
 			}
-			ents[i].vec.x += a_g.x * dt;
-			ents[i].vec.y += a_g.y * dt;
-			ents[i].vec.z += a_g.z * dt;
+			ents[i].vel.x += a_g.x * dt;
+			ents[i].vel.y += a_g.y * dt;
+			ents[i].vel.z += a_g.z * dt;
 		}
 
 		for (uint i = 0; i < ents_sz; i++)
 		{
-			ents[i].pos.x += ents[i].vec.x * dt;
-			ents[i].pos.y += ents[i].vec.y * dt;
-			ents[i].pos.z += ents[i].vec.z * dt;
+			ents[i].pos.x += ents[i].vel.x * dt;
+			ents[i].pos.y += ents[i].vel.y * dt;
+			ents[i].pos.z += ents[i].vel.z * dt;
 		}
 	}
 }
