@@ -1,6 +1,6 @@
-#include "stdio.h"
-#include "stdlib.h"
-#include "math.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
 
 typedef unsigned int uint;
 
@@ -114,6 +114,7 @@ void propagation(Entity ents[], uint ents_sz, size_t t_start, size_t t_end, size
 			ents[i].pos.x += ents[i].vel.x * dt;
 			ents[i].pos.y += ents[i].vel.y * dt;
 			ents[i].pos.z += ents[i].vel.z * dt;
+			printf("body %u %lf %lf %lf \n",i,ents[i].pos.x, ents[i].pos.y,ents[i].pos.z );
 		}
 	}
 }
@@ -127,4 +128,5 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "Usage: %s filename\n", argv[0]);
 	}
 	n_ents = get_entities(argv[1], &ents);
+	propagation(ents, n_ents, 0, 10, 1);
 }

@@ -5,7 +5,7 @@ COMPILER ?= gcc
 .PHONY: all clean
 
 serial: 
-	${COMPILER} -o ${BUILD_DIR}/main serial/main.c
+	${COMPILER} -o ${BUILD_DIR}/main serial/main.c -lm
 
 clean:
 	rm -rf build/*
