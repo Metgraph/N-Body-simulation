@@ -78,6 +78,8 @@ void propagation(Entity ents[], uint ents_sz, size_t t_start, size_t t_end, size
 	uint i, j;
 	RVec3 vec3, unit_vec3, a_g;
 	double r_mag, acceleration;
+	FILE *fpt;
+	fpt=fopen("../tests/output.csv", "w");
 	for (t = t_start; t < t_end; t += dt)
 	{
 		for (i = 0; i < ents_sz; i++)
@@ -114,9 +116,11 @@ void propagation(Entity ents[], uint ents_sz, size_t t_start, size_t t_end, size
 			ents[i].pos.x += ents[i].vel.x * dt;
 			ents[i].pos.y += ents[i].vel.y * dt;
 			ents[i].pos.z += ents[i].vel.z * dt;
-			printf("body %u %lf %lf %lf \n",i,ents[i].pos.x, ents[i].pos.y,ents[i].pos.z );
+			fprintf(fpt,"%u,%lf,%lf,%lf \n",i,ents[i].pos.x, ents[i].pos.y,ents[i].pos.z);
+			//printf("body %u %lf %lf %lf \n",i,ents[i].pos.x, ents[i].pos.y,ents[i].pos.z );
 		}
 	}
+	fclose(fpt);
 }
 
 int main(int argc, char *argv[])
@@ -128,5 +132,5 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "Usage: %s filename\n", argv[0]);
 	}
 	n_ents = get_entities(argv[1], &ents);
-	propagation(ents, n_ents, 0, 10, 1);
+	propagation(ents, n_ents, 0, 500, 1);
 }
