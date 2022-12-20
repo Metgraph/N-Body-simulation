@@ -4,7 +4,7 @@ from mpl_toolkits.mplot3d import Axes3D
 import csv
 
 #open output file and make the list
-file = open("../N-Body-simulation/tests/output.csv", "r")
+file = open("./tests/output.csv", "r")
 data = list(csv.reader(file, delimiter=","))
 file.close()
 
