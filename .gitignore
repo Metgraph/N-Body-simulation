@@ -2,3 +2,4 @@ test/
 .vscode/
 build/
 tests/output.csv
+tests/output/
