@@ -7,5 +7,7 @@ COMPILER ?= gcc
 serial: 
 	${COMPILER} -o ${BUILD_DIR}/main serial/main.c -lm
 
+debug:
+	${COMPILER} -g -o ${BUILD_DIR}/main serial/main.c -lm
 clean:
 	rm -rf build/*
