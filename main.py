@@ -16,9 +16,15 @@ for i in range(len(data)):
     n=float(data[i][0])
 
 #create the 3d space
+
+
 plt.ion()
 fig = plt.figure()
 ax = fig.add_subplot(111, projection='3d')
+ax.set_xlim3d(-1, 1)
+ax.set_ylim3d(-1, 1)
+ax.set_zlim3d(-1, 1)
+
 
 #loop for update the image 
 for k in range(0,len(data)-1,int(n)+1):
@@ -28,3 +34,6 @@ for k in range(0,len(data)-1,int(n)+1):
     plt.draw()
     plt.pause(0.02)
     ax.cla()
+    ax.set_xlim3d(-1, 1)
+    ax.set_ylim3d(-1, 1)
+    ax.set_zlim3d(-1, 1)
