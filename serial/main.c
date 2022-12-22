@@ -161,13 +161,14 @@ void propagation(Entity ents[], uint ents_sz, size_t t_start, size_t t_end,
 	}
 
 	fclose(fpt);
+    free(accels);
 }
 
 int main(int argc, char *argv[]) {
 	uint n_ents;
 	Entity *ents;
     size_t start, end, dt;
-	if (argc != 5) {
+	if (argc != 6) {
 		fprintf(stderr, "Usage: %s input_filename start_time end_time delta_time output_filename\n", argv[0]);
 	}
 	n_ents = get_entities(argv[1], &ents);
@@ -175,4 +176,5 @@ int main(int argc, char *argv[]) {
     end=strtoul(argv[3], NULL, 10);
     dt=strtoul(argv[4], NULL, 10);
 	propagation(ents, n_ents, start, end, dt, argv[5]);
+    free(ents);
 }
