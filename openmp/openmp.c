@@ -2,6 +2,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <omp.h>
 #include <time.h>
 
 typedef unsigned int uint;
@@ -20,7 +21,7 @@ typedef struct {
 
 //TODO choose value for GravConstant
 const double GravConstant = 6.67e-11;
-// const double GravConstant = 0.01;
+//const double GravConstant = 0.01;
 
 // Sum vectors
 RVec3 vec3_sum(RVec3 *v1, RVec3 *v2) {
@@ -112,12 +113,18 @@ void computeAccelerations(Entity *ents, RVec3 *accels, uint ents_sz) {
 		accels[i].x = 0;
 		accels[i].y = 0;
 		accels[i].z = 0;
+
+//OPEN MP CON CHIUSURA
+
 		for (j = 0; j < ents_sz; j++) {
 			if (i != j) {
 				sub_ji = vec3_sub(&ents[j].pos, &ents[i].pos);
 				accel_from_j = vec3_scale(
 					GravConstant * ents[j].mass / pow(vec3_mod(&sub_ji), 3),
 					&sub_ji);
+
+//CHIUSURA OPEN MP
+
 				accels[i] = vec3_sum(&accels[i], &accel_from_j);
 			}
 		}
@@ -127,6 +134,9 @@ void computeAccelerations(Entity *ents, RVec3 *accels, uint ents_sz) {
 void computeVelocities(Entity *ents, RVec3 *accels, uint ents_sz, size_t dt) {
 	uint i;
 	RVec3 diff_vel;
+
+//OPENMP SENZA CHIUSURA
+
 	for (i = 0; i < ents_sz; i++) {
 		diff_vel = vec3_scale((double)dt, &accels[i]);
 		ents[i].vel = vec3_sum(&ents[i].vel, &diff_vel);
@@ -136,6 +146,9 @@ void computeVelocities(Entity *ents, RVec3 *accels, uint ents_sz, size_t dt) {
 void computePositions(Entity *ents, RVec3 *accels, uint ents_sz, size_t dt) {
 	uint i;
 	RVec3 space_from_acc, space_from_vel, movement;
+
+//OPEN MP SENZA CHIUDERE
+
 	for (i = 0; i < ents_sz; i++) {
 		space_from_acc = vec3_scale(0.5 * (double)(dt * dt), &accels[i]);
 		space_from_vel = vec3_scale((double)dt, &ents[i].vel);
@@ -150,15 +163,21 @@ void propagation(Entity ents[], uint ents_sz, size_t t_start, size_t t_end,
 	RVec3 *accels = (RVec3 *)malloc(ents_sz * sizeof(RVec3));
 	FILE *fpt;
 	fpt = fopen(output, "w");
+    omp_set_num_threads(3);
+    #pragma omp parallel for
 	for (size_t t = t_start; t < t_end; t += dt) {
+
+//PROVARE OPENMP QUI SENZA CHIUSURA PERCHE' I RISULTATI VENGONO INSERITI NELLA LISTA CHE VIENE LETTA SENZA 
+//LA PARALLELLIZZAZIONE QUINDI IN ORDINE (VIENE LETTA QUANDO SI SCRIVE IL CSV)
+
 		computeAccelerations(ents, accels, ents_sz);
 		computePositions(ents, accels, ents_sz, dt);
 		computeVelocities(ents, accels, ents_sz, dt);
 		resolveCollisions(ents, ents_sz);
         for(uint i=0; i<ents_sz; i++)
-            fprintf(fpt, "%u,%lf,%lf,%lf,%lf,%lf,%lf \n", i, ents[i].pos.x,
+            fprintf(fpt, "%u,%lf,%lf,%lf,%lf,%lf,%lf,%lf \n", i, ents[i].pos.x,
             ents[i].pos.y, ents[i].pos.z, ents[i].vel.x,ents[i].vel.y,
-            ents[i].vel.z);
+            ents[i].vel.z, ents->mass);
 	}
 
 	fclose(fpt);
@@ -166,8 +185,10 @@ void propagation(Entity ents[], uint ents_sz, size_t t_start, size_t t_end,
 }
 
 int main(int argc, char *argv[]) {
+
 	double time_spent = 0.0;
-	clock_t inizio = clock();
+ 
+    clock_t inizio = clock();
 
 	uint n_ents;
 	Entity *ents;
@@ -181,6 +202,7 @@ int main(int argc, char *argv[]) {
     dt=strtoul(argv[4], NULL, 10);
 	propagation(ents, n_ents, start, end, dt, argv[5]);
     free(ents);
+
 
 	clock_t fine = clock();
 	time_spent += (double)(fine - inizio) / CLOCKS_PER_SEC;
