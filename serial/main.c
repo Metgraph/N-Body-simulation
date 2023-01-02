@@ -80,10 +80,10 @@ uint get_entities(char filename[], Entity **ents)
 void propagation(Entity ents[], uint ents_sz, size_t t_start, size_t t_end, size_t dt, const char *output)
 {
 	FILE *fpt;
-	size_t t = t_start;
+	// size_t t = t_start;
 
 	fpt = fopen(output, "w");
-	while (t < t_end)
+	for(size_t t = t_start; t<t_end; t+=dt)
 	{
 		for (size_t m1_idx = 0; m1_idx < ents_sz; m1_idx++)
 		{
@@ -126,7 +126,7 @@ void propagation(Entity ents[], uint ents_sz, size_t t_start, size_t t_end, size
             ents[entity_idx].vel.z);
 		}
 
-		t += dt;
+		// t += dt;
 	}
 	fclose(fpt);
 }
