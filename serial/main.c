@@ -100,26 +100,6 @@ uint get_entities(char filename[], Entity **ents)
 	return size;
 }
 
-// void propagation(Entity ents[], uint ents_sz, size_t t_start, size_t t_end,
-// 				 size_t dt, const char *output) {
-// 	RVec3 *accels = (RVec3 *)malloc(ents_sz * sizeof(RVec3));
-// 	FILE *fpt;
-// 	fpt = fopen(output, "w");
-// 	for (size_t t = t_start; t < t_end; t += dt) {
-// 		computeAccelerations(ents, accels, ents_sz);
-// 		computePositions(ents, accels, ents_sz, dt);
-// 		computeVelocities(ents, accels, ents_sz, dt);
-// 		resolveCollisions(ents, ents_sz);
-//         for(uint i=0; i<ents_sz; i++)
-//             fprintf(fpt, "%u,%lf,%lf,%lf,%lf,%lf,%lf \n", i, ents[i].pos.x,
-//             ents[i].pos.y, ents[i].pos.z, ents[i].vel.x,ents[i].vel.y,
-//             ents[i].vel.z);
-// 	}
-
-// 	fclose(fpt);
-//     free(accels);
-// }
-
 void propagation(Entity ents[], uint ents_sz, size_t t_start, size_t t_end, size_t dt, const char *output)
 {
 	FILE *fpt;
