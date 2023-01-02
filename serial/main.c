@@ -2,6 +2,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 
 typedef unsigned int uint;
 
@@ -156,6 +157,7 @@ void propagation(Entity ents[], uint ents_sz, size_t t_start, size_t t_end, size
 
 int main(int argc, char *argv[])
 {
+
 	uint n_ents;
 	Entity *ents;
 	size_t start, end, dt;
@@ -171,5 +173,6 @@ int main(int argc, char *argv[])
 	end=86400 * 365 * 10;
 	dt=86400;
 	propagation(ents, n_ents, start, end, dt, argv[5]);
+
 	free(ents);
 }
