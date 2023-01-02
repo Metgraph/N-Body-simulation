@@ -24,30 +24,6 @@ typedef struct
 const double BIG_G = 6.67e-11;
 // const double GravConstant = 0.01;
 
-// Sum vectors
-RVec3 vec3_sum(RVec3 *v1, RVec3 *v2)
-{
-	RVec3 sum = {v1->x + v2->x, v1->y + v2->y, v1->z + v2->z};
-	return sum;
-}
-
-RVec3 vec3_sub(RVec3 *v1, RVec3 *v2)
-{
-	RVec3 sub = {v1->x - v2->x, v1->y - v2->y, v1->z - v2->z};
-	return sub;
-}
-
-RVec3 vec3_scale(double scalar, RVec3 *v)
-{
-	RVec3 prod = {v->x * scalar, v->y * scalar, v->z * scalar};
-	return prod;
-}
-
-double vec3_mod(RVec3 *v)
-{
-	return sqrt(v->x * v->x + v->y * v->y + v->z * v->z);
-}
-
 // Read file and generate an array of Entity
 uint get_entities(char filename[], Entity **ents)
 {
