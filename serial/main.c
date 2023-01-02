@@ -166,12 +166,9 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "Usage: %s input_filename start_time end_time delta_time output_filename\n", argv[0]);
 	}
 	n_ents = get_entities(argv[1], &ents);
-	// start = strtoul(argv[2], NULL, 10);
-	// end = strtoul(argv[3], NULL, 10);
-	// dt = strtoul(argv[4], NULL, 10);
-	start=0;
-	end=86400 * 365 * 10;
-	dt=86400;
+	start = strtoul(argv[2], NULL, 10);
+	end = strtoul(argv[3], NULL, 10);
+	dt = strtoul(argv[4], NULL, 10);
 	propagation(ents, n_ents, start, end, dt, argv[5]);
 
 	free(ents);
