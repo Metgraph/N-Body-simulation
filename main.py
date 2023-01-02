@@ -2,11 +2,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import csv
+import sys
 
 #open output file and make the list
-file = open("./tests/output.csv", "r")
+file = open(sys.argv[1], "r")
 data = list(csv.reader(file, delimiter=","))
 file.close()
+scale_const=10e10
 
 #detect how many bodies there are
 n = float(0)
@@ -21,9 +23,9 @@ for i in range(len(data)):
 plt.ion()
 fig = plt.figure()
 ax = fig.add_subplot(111, projection='3d')
-ax.set_xlim3d(-1, 1)
-ax.set_ylim3d(-1, 1)
-ax.set_zlim3d(-1, 1)
+ax.set_xlim3d(-scale_const, scale_const)
+ax.set_ylim3d(-scale_const, scale_const)
+ax.set_zlim3d(-scale_const, scale_const)
 
 
 #loop for update the image 
@@ -34,6 +36,6 @@ for k in range(0,len(data)-1,int(n)+1):
     plt.draw()
     plt.pause(0.02)
     ax.cla()
-    ax.set_xlim3d(-1, 1)
-    ax.set_ylim3d(-1, 1)
-    ax.set_zlim3d(-1, 1)
+    ax.set_xlim3d(-scale_const, scale_const)
+    ax.set_ylim3d(-scale_const, scale_const)
+    ax.set_zlim3d(-scale_const, scale_const)
