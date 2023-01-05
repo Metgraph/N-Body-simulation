@@ -83,7 +83,7 @@ void propagation(Entity ents[], uint ents_sz, size_t t_start, size_t t_end, size
 	FILE *fpt;
 
 	// alloc and initialize all value to 0 (0 in floating point is represented by all 0)
-	RVec3 *a_g = calloc(ents_sz, sizeof(RVec3));
+	RVec3 *a_g = (RVec3*)calloc(ents_sz, sizeof(RVec3));
 	fpt = fopen(output, "w");
 	for (size_t t = t_start; t < t_end; t += dt)
 	{
