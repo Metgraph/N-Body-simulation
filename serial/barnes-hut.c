@@ -267,8 +267,39 @@ void add_ents(Octtree *tree, Entity ents[], int ents_sz)
     }
 }
 
+
+//calculate number of entities, mass and center of each branch
 void set_branch_values(Octtree *tree)
 {
+    //root is the first node after the leaves with an entity, so from location 0 to root-1 there are all leaves from which
+    //will be calculated the branch values
+
+    //avoid to write everytime tree->nodes
+    int parent_indx, child_indx;
+    double new_mass;
+    // Octnode *nodes=tree->nodes;
+    Octnode *parent, *child;
+    for (int i = 0; i < tree->root; i++)
+    {
+        child_indx=i;
+        while(tree->nodes[child_indx].parent>-1){
+            child=&tree->nodes[child_indx];
+            parent_indx=child->parent;
+            parent=&tree->nodes[parent_indx];
+
+            parent->ents++;
+            new_mass=parent->mass + child->mass;
+            //calculate center
+            parent->center.x=(child->center.x * child->mass / new_mass) + (parent->center.x * parent->mass / new_mass);
+            parent->center.y=(child->center.y * child->mass / new_mass) + (parent->center.y * parent->mass / new_mass);
+            parent->center.z=(child->center.z * child->mass / new_mass) + (parent->center.z * parent->mass / new_mass);
+            
+            parent->mass=new_mass;
+
+            child_indx=parent_indx;
+        }
+    }
+    
 }
 
 void get_bounding_box(Entity ents[], int ents_sz, double *max, double *min)
