@@ -146,12 +146,33 @@ uint get_indx_loc(RVec3 *pos, RVec3 *center, double *border_size)
     return indx;
 }
 
+void double_Octtree(Octtree *tree){
+    tree->sz*=2;
+    realloc(tree->nodes, tree->sz);
+
+}
+
+void init_node(Octnode *node){
+    node->center.x=0;
+    node->center.y=0;
+    node->center.z=0;
+    node->mass=0;
+    node->ents=0;
+    node->parent=-1;
+    for (uint i = 0; i < 8; i++)
+    {
+        node->children[i]=-1;
+    }
+    
+}
+
 void add_ent(Octtree *tree, Entity *ent, int id)
 {
+    //allocated is used as a boolean
     int allocated, node_indx, indx;
     Octnode *node;
     double border_size;
-    RVec3 center;
+    RVec3 volume_center;
     // set init value
     allocated = 0;
     // keep last visited node index
@@ -160,14 +181,14 @@ void add_ent(Octtree *tree, Entity *ent, int id)
     border_size = tree->max - tree->min;
 
     // set center of whole volume
-    center.x = border_size / 2;
-    center.y = border_size / 2;
-    center.z = border_size / 2;
+    volume_center.x = border_size / 2;
+    volume_center.y = border_size / 2;
+    volume_center.z = border_size / 2;
 
     do
     {
         // center and border_size are updated to the next branch value
-        indx = get_indx_loc(&ent->pos, &center, &border_size);
+        indx = get_indx_loc(&ent->pos, &volume_center, &border_size);
         allocated = node->children[indx] == -1;
         if (allocated)
         {
@@ -179,18 +200,25 @@ void add_ent(Octtree *tree, Entity *ent, int id)
             if (node->children[indx] < tree->root)
             {
                 //other is the other leaf
-                RVec3 other_center=center;
+                RVec3 other_center=volume_center;
                 double other_border=border_size;
                 int other = node->children[indx];
                 int other_indx;
                 do{
+                    //double space if tree is full
+                    if(tree->firstfree==tree->sz){
+                        double_Octtree(tree);
+                    }
+                    
                     //take first free location and set the parent of the new branch
+                    init_node(&tree->nodes[tree->firstfree]);
                     tree->nodes[tree->firstfree].parent=node_indx;
                     //set the new branch as child
                     node->children[indx]=tree->firstfree;
                     
                     //get leaves position in the new branch
-                    indx = get_indx_loc(&ent->pos, &center, &border_size);
+                    indx = get_indx_loc(&ent->pos, &volume_center, &border_size);
+                    //the center of the leaf is the position of the entity associated
                     other_indx = get_indx_loc(&tree->nodes[other].center, &other_center, &other_border);
 
                     //use the new branch as the current one
@@ -201,9 +229,17 @@ void add_ent(Octtree *tree, Entity *ent, int id)
                     
                 //if the leaves will be in different position exit the loop
                 }while(indx == other_indx);
-                allocated=1;
-                //TODO save entity in the new branch and update their father
 
+                //set new parent in the leaves values
+                tree->nodes[other].parent=node_indx;
+                tree->nodes[id].parent=node_indx;
+
+                //set the leaves as branch children
+                node->children[indx]=id;
+                node->children[other_indx]=other;
+                
+
+                allocated=1;
             }
             else
             {
