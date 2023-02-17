@@ -454,23 +454,23 @@ int main(int argc, char *argv[])
     uint n_ents;
     Entity *ents;
     size_t start, end, dt;
-    // if (argc != 6)
-    // {
-    //     fprintf(stderr, "Usage: %s input_filename start_time end_time delta_time output_filename\n", argv[0]);
-    //     return 1;
-    // }
+    if (argc != 6)
+    {
+        fprintf(stderr, "Usage: %s input_filename start_time end_time delta_time output_filename\n", argv[0]);
+        return 1;
+    }
 
-    // n_ents = get_entities(argv[1], &ents);
-    // start = strtoul(argv[2], NULL, 10);
-    // end = strtoul(argv[3], NULL, 10);
-    // dt = strtoul(argv[4], NULL, 10);
-    // propagation(ents, n_ents, start, end, dt, argv[5]);
+    n_ents = get_entities(argv[1], &ents);
+    start = strtoul(argv[2], NULL, 10);
+    end = strtoul(argv[3], NULL, 10);
+    dt = strtoul(argv[4], NULL, 10);
+    propagation(ents, n_ents, start, end, dt, argv[5]);
 
-    n_ents=get_entities("./tests/sun_earth.csv", &ents);
-    start=0;
-    end=5000;
-    dt=1;
-    propagation(ents, n_ents, start, end, dt, "./test/output.csv");
+    // n_ents=get_entities("./tests/sun_earth.csv", &ents);
+    // start=0;
+    // end=5000;
+    // dt=1;
+    // propagation(ents, n_ents, start, end, dt, "./test/output.csv");
 
     free(ents);
     return 0;
