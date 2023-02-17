@@ -154,7 +154,7 @@ uint get_indx_loc(RVec3 *pos, RVec3 *center, double *border_size)
 void double_Octtree(Octtree *tree)
 {
     tree->sz *= 2;
-    realloc(tree->nodes, tree->sz);
+    tree->nodes=realloc(tree->nodes, tree->sz*sizeof(Octnode));
 }
 
 void init_node(Octnode *node)
@@ -212,9 +212,11 @@ void add_ent(Octtree *tree, Entity *ent, int id)
                 do
                 {
                     // double space if tree is full
-                    if (tree->firstfree == tree->sz)
+                    if (tree->firstfree >= tree->sz)
                     {
                         double_Octtree(tree);
+                        //update the pointer to new address
+                        node = &tree->nodes[node_indx];
                     }
 
                     // take first free location and set the parent of the new branch
@@ -309,10 +311,10 @@ void set_branch_values(Octtree *tree)
 
 void get_bounding_box(Entity ents[], int ents_sz, double *max, double *min)
 {
-    default_max_min(&max, &min);
+    default_max_min(max, min);
     for (int i = 0; i < ents_sz; i++)
     {
-        update_max_min(&max, &min, &ents[i].pos);
+        update_max_min(max, min, &ents[i].pos);
     }
 }
 
@@ -402,14 +404,14 @@ void get_acceleration(Octtree *tree, int id, RVec3 *acc)
     get_acceleration_rec(tree, tree->root, id, acc, tree->max - tree->min);
 }
 
-void calculate_propagation(Entity ents[], int ents_sz, Octtree *tree, uint dt, FILE *fpt)
+void calculate_propagation(Entity ents[], int ents_sz, Octtree *tree, size_t dt, FILE *fpt)
 {
 
     RVec3 acc;
     // calculate new velocity
     for (int i = 0; i < ents_sz; i++)
     {
-
+        
         get_acceleration(tree, i, &acc);
         ents[i].vel = acc;
     }
@@ -420,7 +422,7 @@ void calculate_propagation(Entity ents[], int ents_sz, Octtree *tree, uint dt, F
         ents[i].pos.x += ents[i].vel.x * dt;
         ents[i].pos.y += ents[i].vel.y * dt;
         ents[i].pos.z += ents[i].vel.z * dt;
-        fprintf(fpt, "%u,%lf,%lf,%lf,%lf,%lf,%lf \n", i, ents[i].pos.x,
+        fprintf(fpt, "%d,%lf,%lf,%lf,%lf,%lf,%lf \n", i, ents[i].pos.x,
                 ents[i].pos.y, ents[i].pos.z, ents[i].vel.x, ents[i].vel.y,
                 ents[i].vel.z);
     }
@@ -437,7 +439,9 @@ void propagation(Entity ents[], int ents_sz, size_t t_start, size_t t_end, size_
     fpt = fopen(output, "w");
     for (size_t t = t_start; t < t_end; t += dt)
     {
-
+        add_ents(&tree, ents, ents_sz);
+        set_branch_values(&tree);
+        calculate_propagation(ents, ents_sz, &tree, dt, fpt);
         init_node(&tree.nodes[tree.root]);
     }
 
@@ -450,15 +454,24 @@ int main(int argc, char *argv[])
     uint n_ents;
     Entity *ents;
     size_t start, end, dt;
-    if (argc != 6)
-    {
-        fprintf(stderr, "Usage: %s input_filename start_time end_time delta_time output_filename\n", argv[0]);
-    }
-    n_ents = get_entities(argv[1], &ents);
-    start = strtoul(argv[2], NULL, 10);
-    end = strtoul(argv[3], NULL, 10);
-    dt = strtoul(argv[4], NULL, 10);
-    propagation(ents, n_ents, start, end, dt, argv[5]);
+    // if (argc != 6)
+    // {
+    //     fprintf(stderr, "Usage: %s input_filename start_time end_time delta_time output_filename\n", argv[0]);
+    //     return 1;
+    // }
+
+    // n_ents = get_entities(argv[1], &ents);
+    // start = strtoul(argv[2], NULL, 10);
+    // end = strtoul(argv[3], NULL, 10);
+    // dt = strtoul(argv[4], NULL, 10);
+    // propagation(ents, n_ents, start, end, dt, argv[5]);
+
+    n_ents=get_entities("./tests/sun_earth.csv", &ents);
+    start=0;
+    end=5000;
+    dt=1;
+    propagation(ents, n_ents, start, end, dt, "./test/output.csv");
 
     free(ents);
+    return 0;
 }
