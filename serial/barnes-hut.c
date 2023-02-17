@@ -43,9 +43,9 @@ typedef struct
 } Octtree;
 
 const double BIG_G = 6.67e-11;
-const double MIN_NODE_DIM = 10;
+const double THETA = 0.5; // 1;
 
-//TODO put in a common file
+// TODO put in a common file
 uint get_entities(char filename[], Entity **ents)
 {
     Entity e_buff;
@@ -98,6 +98,11 @@ uint get_entities(char filename[], Entity **ents)
     return size;
 }
 
+double get_distance(RVec3 *r1, RVec3 *r2)
+{
+    return sqrt(pow(r1->x - r2->x, 2) + pow(r1->y - r2->y, 2) + pow(r1->z - r2->z, 2));
+}
+
 Octnode *allocate_node(int parent)
 {
     Octnode *ret;
@@ -146,29 +151,29 @@ uint get_indx_loc(RVec3 *pos, RVec3 *center, double *border_size)
     return indx;
 }
 
-void double_Octtree(Octtree *tree){
-    tree->sz*=2;
+void double_Octtree(Octtree *tree)
+{
+    tree->sz *= 2;
     realloc(tree->nodes, tree->sz);
-
 }
 
-void init_node(Octnode *node){
-    node->center.x=0;
-    node->center.y=0;
-    node->center.z=0;
-    node->mass=0;
-    node->ents=0;
-    node->parent=-1;
+void init_node(Octnode *node)
+{
+    node->center.x = 0;
+    node->center.y = 0;
+    node->center.z = 0;
+    node->mass = 0;
+    node->ents = 0;
+    node->parent = -1;
     for (uint i = 0; i < 8; i++)
     {
-        node->children[i]=-1;
+        node->children[i] = -1;
     }
-    
 }
 
 void add_ent(Octtree *tree, Entity *ent, int id)
 {
-    //allocated is used as a boolean
+    // allocated is used as a boolean
     int allocated, node_indx, indx;
     Octnode *node;
     double border_size;
@@ -199,51 +204,52 @@ void add_ent(Octtree *tree, Entity *ent, int id)
             // if the location is occupied by a leaf (an entity)
             if (node->children[indx] < tree->root)
             {
-                //other is the other leaf
-                RVec3 other_center=volume_center;
-                double other_border=border_size;
+                // other is the other leaf
+                RVec3 other_center = volume_center;
+                double other_border = border_size;
                 int other = node->children[indx];
                 int other_indx;
-                do{
-                    //double space if tree is full
-                    if(tree->firstfree==tree->sz){
+                do
+                {
+                    // double space if tree is full
+                    if (tree->firstfree == tree->sz)
+                    {
                         double_Octtree(tree);
                     }
-                    
-                    //take first free location and set the parent of the new branch
+
+                    // take first free location and set the parent of the new branch
                     init_node(&tree->nodes[tree->firstfree]);
-                    tree->nodes[tree->firstfree].parent=node_indx;
-                    //set the new branch as child
-                    node->children[indx]=tree->firstfree;
-                    
-                    //get leaves position in the new branch
+                    tree->nodes[tree->firstfree].parent = node_indx;
+                    // set the new branch as child
+                    node->children[indx] = tree->firstfree;
+
+                    // get leaves position in the new branch
                     indx = get_indx_loc(&ent->pos, &volume_center, &border_size);
-                    //the center of the leaf is the position of the entity associated
+                    // the center of the leaf is the position of the entity associated
                     other_indx = get_indx_loc(&tree->nodes[other].center, &other_center, &other_border);
 
-                    //use the new branch as the current one
-                    node_indx=tree->firstfree;
-                    node=&tree->nodes[node_indx];
-                    //update first free location
+                    // use the new branch as the current one
+                    node_indx = tree->firstfree;
+                    node = &tree->nodes[node_indx];
+                    // update first free location
                     tree->firstfree++;
-                    
-                //if the leaves will be in different position exit the loop
-                }while(indx == other_indx);
 
-                //set new parent in the leaves values
-                tree->nodes[other].parent=node_indx;
-                tree->nodes[id].parent=node_indx;
+                    // if the leaves will be in different position exit the loop
+                } while (indx == other_indx);
 
-                //set the leaves as branch children
-                node->children[indx]=id;
-                node->children[other_indx]=other;
-                
+                // set new parent in the leaves values
+                tree->nodes[other].parent = node_indx;
+                tree->nodes[id].parent = node_indx;
 
-                allocated=1;
+                // set the leaves as branch children
+                node->children[indx] = id;
+                node->children[other_indx] = other;
+
+                allocated = 1;
             }
             else
             {
-                //change current node to the child node
+                // change current node to the child node
                 node_indx = node->children[indx];
                 node = &tree->nodes[node_indx];
             }
@@ -267,39 +273,38 @@ void add_ents(Octtree *tree, Entity ents[], int ents_sz)
     }
 }
 
-
-//calculate number of entities, mass and center of each branch
+// calculate number of entities, mass and center of each branch
 void set_branch_values(Octtree *tree)
 {
-    //root is the first node after the leaves with an entity, so from location 0 to root-1 there are all leaves from which
-    //will be calculated the branch values
+    // root is the first node after the leaves with an entity, so from location 0 to root-1 there are all leaves from which
+    // will be calculated the branch values
 
-    //avoid to write everytime tree->nodes
+    // avoid to write everytime tree->nodes
     int parent_indx, child_indx;
     double new_mass;
     // Octnode *nodes=tree->nodes;
     Octnode *parent, *child;
     for (int i = 0; i < tree->root; i++)
     {
-        child_indx=i;
-        while(tree->nodes[child_indx].parent>-1){
-            child=&tree->nodes[child_indx];
-            parent_indx=child->parent;
-            parent=&tree->nodes[parent_indx];
+        child_indx = i;
+        while (tree->nodes[child_indx].parent > -1)
+        {
+            child = &tree->nodes[child_indx];
+            parent_indx = child->parent;
+            parent = &tree->nodes[parent_indx];
 
             parent->ents++;
-            new_mass=parent->mass + child->mass;
-            //calculate center
-            parent->center.x=(child->center.x * child->mass / new_mass) + (parent->center.x * parent->mass / new_mass);
-            parent->center.y=(child->center.y * child->mass / new_mass) + (parent->center.y * parent->mass / new_mass);
-            parent->center.z=(child->center.z * child->mass / new_mass) + (parent->center.z * parent->mass / new_mass);
-            
-            parent->mass=new_mass;
+            new_mass = parent->mass + child->mass;
+            // calculate center
+            parent->center.x = (child->center.x * child->mass / new_mass) + (parent->center.x * parent->mass / new_mass);
+            parent->center.y = (child->center.y * child->mass / new_mass) + (parent->center.y * parent->mass / new_mass);
+            parent->center.z = (child->center.z * child->mass / new_mass) + (parent->center.z * parent->mass / new_mass);
 
-            child_indx=parent_indx;
+            parent->mass = new_mass;
+
+            child_indx = parent_indx;
         }
     }
-    
 }
 
 void get_bounding_box(Entity ents[], int ents_sz, double *max, double *min)
@@ -330,8 +335,11 @@ void init_tree(Entity ents[], int ents_sz, Octtree *tree)
     root.center.y = 0;
     root.center.z = 0;
     root.mass = 0;
-    root.parent = NULL;
+    root.parent = -1;
     root.ents = 0;
+    for(int i=0; i<8; i++){
+        root.children[i]=-1;
+    }
     tree->nodes[ents_sz] = root;
 }
 
@@ -341,18 +349,100 @@ void create_tree(Entity ents[], int ents_sz, Octtree *tree)
     init_tree(ents, ents_sz, tree);
 }
 
-//will calculate the bodies position over time
+void calculate_acceleration(Octnode *ent, Octnode *node, RVec3 *acc)
+{
+
+    RVec3 r_vector;
+
+    r_vector.x = ent->center.x - node->center.x;
+    r_vector.y = ent->center.y - node->center.y;
+    r_vector.z = ent->center.z - node->center.z;
+
+    double r_mag = sqrt(r_vector.x * r_vector.x + r_vector.y * r_vector.y + r_vector.z * r_vector.z);
+
+    double acceleration = -1.0 * BIG_G * (node->mass) / pow(r_mag, 2.0);
+
+    RVec3 r_unit_vector = {r_vector.x / r_mag, r_vector.y / r_mag, r_vector.z / r_mag};
+
+    acc->x += acceleration * r_unit_vector.x;
+    acc->y += acceleration * r_unit_vector.y;
+    acc->z += acceleration * r_unit_vector.z;
+}
+
+void get_acceleration_rec(Octtree *tree, int node_indx, int id, RVec3 *acc, double border)
+{
+    double distance;
+    Octnode *ent = &tree->nodes[id];
+    Octnode *node = &tree->nodes[node_indx];
+    distance = get_distance(&node->center, &ent->center);
+
+    if (border / distance < THETA || node->ents == 1)
+    {
+        calculate_acceleration(ent, node, acc);
+    }
+    else
+    {
+        for (int i = 0; i < 8; i++)
+        {
+            int indx = node->children[i];
+            if (indx > -1 && indx != id)
+            {
+                get_acceleration_rec(tree, indx, id, acc, border / 2);
+            }
+        }
+    }
+}
+
+void get_acceleration(Octtree *tree, int id, RVec3 *acc)
+{
+    // RVec3 acc = {0, 0, 0};
+    acc->x = 0;
+    acc->y = 0;
+    acc->z = 0;
+    get_acceleration_rec(tree, tree->root, id, acc, tree->max - tree->min);
+}
+
+void calculate_propagation(Entity ents[], int ents_sz, Octtree *tree, uint dt, FILE *fpt)
+{
+
+    RVec3 acc;
+    // calculate new velocity
+    for (int i = 0; i < ents_sz; i++)
+    {
+
+        get_acceleration(tree, i, &acc);
+        ents[i].vel = acc;
+    }
+
+    // calculate new position
+    for (int i = 0; i < ents_sz; i++)
+    {
+        ents[i].pos.x += ents[i].vel.x * dt;
+        ents[i].pos.y += ents[i].vel.y * dt;
+        ents[i].pos.z += ents[i].vel.z * dt;
+        fprintf(fpt, "%u,%lf,%lf,%lf,%lf,%lf,%lf \n", i, ents[i].pos.x,
+                ents[i].pos.y, ents[i].pos.z, ents[i].vel.x, ents[i].vel.y,
+                ents[i].vel.z);
+    }
+}
+
+// will calculate the bodies position over time
 void propagation(Entity ents[], int ents_sz, size_t t_start, size_t t_end, size_t dt, const char *output)
 {
     FILE *fpt;
     // create root and set values
     // root=allocate_node(NULL);
+    Octtree tree;
+    create_tree(ents, ents_sz, &tree);
     fpt = fopen(output, "w");
     for (size_t t = t_start; t < t_end; t += dt)
     {
+
+        init_node(&tree.nodes[tree.root]);
     }
 
     fclose(fpt);
+    free(tree.nodes);
 }
 
 int main(int argc, char *argv[])
