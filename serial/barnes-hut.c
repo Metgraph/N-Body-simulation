@@ -1,4 +1,5 @@
 // https://lewiscoleblog.com/barnes-hut
+//TODO fix propagation, bodies have strange move (probably it start when the quantity of branch increase)
 
 #include <math.h>
 #include <stdio.h>
@@ -98,6 +99,37 @@ uint get_entities(char filename[], Entity **ents)
     return size;
 }
 
+
+void print_tree_rec(Octtree *tree, int id, char *space, uint depth){
+    Octnode *node=&tree->nodes[id];
+    printf("%sid: %d, (x:%lf, y:%lf, z:%lf)\n", space, id, node->center.x, node->center.y, node->center.z);
+    if(node->ents>1){
+
+        
+        int i;
+        for(i=depth*4; i<depth*4+4; i++){
+            space[i]=' ';
+
+        }
+        space[i]='\0';
+        for(int i=0; i<8; i++){
+            if(node->children[i]>-1){
+                print_tree_rec(tree, node->children[i], space, depth+1);
+            }
+        }
+        space[depth*4]='\0';
+    }
+}
+
+//used for debug
+void print_tree(Octtree *tree){
+    uint sz_space=4*40;
+    char *space=malloc(sz_space*sizeof(char));
+    space[0]='\0';
+    print_tree_rec(tree, tree->root, space, 0);
+    free(space);
+}
+
 double get_distance(RVec3 *r1, RVec3 *r2)
 {
     return sqrt(pow(r1->x - r2->x, 2) + pow(r1->y - r2->y, 2) + pow(r1->z - r2->z, 2));
@@ -157,6 +189,7 @@ void double_Octtree(Octtree *tree)
     tree->nodes=realloc(tree->nodes, tree->sz*sizeof(Octnode));
 }
 
+//set value for a empty node
 void init_node(Octnode *node)
 {
     node->center.x = 0;
@@ -171,6 +204,8 @@ void init_node(Octnode *node)
     }
 }
 
+//add a entity in the tree
+//it's create all the needed branch
 void add_ent(Octtree *tree, Entity *ent, int id)
 {
     // allocated is used as a boolean
@@ -298,6 +333,7 @@ void set_branch_values(Octtree *tree)
             parent->ents++;
             new_mass = parent->mass + child->mass;
             // calculate center
+            //maybe is better check if there are other entities, so to avoid spread of error
             parent->center.x = (child->center.x * child->mass / new_mass) + (parent->center.x * parent->mass / new_mass);
             parent->center.y = (child->center.y * child->mass / new_mass) + (parent->center.y * parent->mass / new_mass);
             parent->center.z = (child->center.z * child->mass / new_mass) + (parent->center.z * parent->mass / new_mass);
@@ -351,6 +387,7 @@ void create_tree(Entity ents[], int ents_sz, Octtree *tree)
     init_tree(ents, ents_sz, tree);
 }
 
+//calculate calculation caused by another body
 void calculate_acceleration(Octnode *ent, Octnode *node, RVec3 *acc)
 {
 
@@ -371,6 +408,7 @@ void calculate_acceleration(Octnode *ent, Octnode *node, RVec3 *acc)
     acc->z += acceleration * r_unit_vector.z;
 }
 
+//calculate body acceleration
 void get_acceleration_rec(Octtree *tree, int node_indx, int id, RVec3 *acc, double border)
 {
     double distance;
@@ -395,6 +433,7 @@ void get_acceleration_rec(Octtree *tree, int node_indx, int id, RVec3 *acc, doub
     }
 }
 
+//call recursive function get_acceleration_rec
 void get_acceleration(Octtree *tree, int id, RVec3 *acc)
 {
     // RVec3 acc = {0, 0, 0};
@@ -413,7 +452,9 @@ void calculate_propagation(Entity ents[], int ents_sz, Octtree *tree, size_t dt,
     {
         
         get_acceleration(tree, i, &acc);
-        ents[i].vel = acc;
+        ents[i].vel.x+=acc.x*dt;
+        ents[i].vel.y+=acc.y*dt;
+        ents[i].vel.z+=acc.z*dt;
     }
 
     // calculate new position
@@ -432,17 +473,22 @@ void calculate_propagation(Entity ents[], int ents_sz, Octtree *tree, size_t dt,
 void propagation(Entity ents[], int ents_sz, size_t t_start, size_t t_end, size_t dt, const char *output)
 {
     FILE *fpt;
-    // create root and set values
-    // root=allocate_node(NULL);
     Octtree tree;
     create_tree(ents, ents_sz, &tree);
     fpt = fopen(output, "w");
     for (size_t t = t_start; t < t_end; t += dt)
     {
+        fprintf(fpt, "time: %lu\n", t);
         add_ents(&tree, ents, ents_sz);
         set_branch_values(&tree);
+        printf("time: %lu\n", t);
+        print_tree(&tree);
+        printf("---------------------------------\n");
         calculate_propagation(ents, ents_sz, &tree, dt, fpt);
+        //to reset the tree just reset the root and reset firstfree
         init_node(&tree.nodes[tree.root]);
+        tree.firstfree=tree.root+1;
+
     }
 
     fclose(fpt);
