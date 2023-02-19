@@ -170,20 +170,43 @@ void default_max_min(double *max, double *min)
 // border_size contains the border size of the current branch volume (so the volume is border_size^3)
 uint get_indx_loc(RVec3 *pos, RVec3 *center, double *border_size)
 {
-    int indx;
-    int x, y, z;
-    z = pos->z >= center->z;
-    y = pos->y >= center->y;
-    x = pos->x >= center->x;
-    indx = z * 4 + y * 2 + x;
-    // used to calculate new center
-    double bord_div4 = *border_size / 4;
-    center->x += x ? bord_div4 : -(bord_div4); // double(x)*2*border_size - border_size
-    center->y += y ? bord_div4 : -(bord_div4);
-    center->z += z ? bord_div4 : -(bord_div4);
-    *border_size /= 2;
+        int index=0;
+    double border4=*border_size/4;
+    if(pos->x<center->x){
+        center->x-= border4;
+    }else{
+        center->x+=border4;
+        index+=1;
+    }
+    if(pos->y<center->y){
+        center->y-= border4;
+    }else{
+        center->y+=border4;
+        index+=1*2;
+    }
+    if(pos->z<center->z){
+        center->z-= border4;
+    }else{
+        center->z+=border4;
+        index+=1*4;
+    }
+    *border_size/=2;
+    
+    return index;
+    // int indx;
+    // int x, y, z;
+    // z = pos->z >= center->z;
+    // y = pos->y >= center->y;
+    // x = pos->x >= center->x;
+    // indx = z * 4 + y * 2 + x;
+    // // used to calculate new center
+    // double bord_div4 = *border_size / 4;
+    // center->x += x ? bord_div4 : -(bord_div4); // double(x)*2*border_size - border_size
+    // center->y += y ? bord_div4 : -(bord_div4);
+    // center->z += z ? bord_div4 : -(bord_div4);
+    // *border_size /= 2;
 
-    return indx;
+    // return indx;
 }
 
 void double_Octtree(Octtree *tree)
@@ -253,6 +276,8 @@ void add_ent(Octtree *tree, Entity *ent, int id)
                     // double space if tree is full
                     if (tree->firstfree >= tree->sz)
                     {
+                        
+                        // printf("ID: %d, other: %d, border: %lf, other_border: %lf, distance: %lf\n", id, other, border_size, other_border, distance);
                         double_Octtree(tree);
                         //update the pointer to new address
                         node = &tree->nodes[node_indx];
@@ -268,7 +293,9 @@ void add_ent(Octtree *tree, Entity *ent, int id)
                     indx = get_indx_loc(&ent->pos, &volume_center, &border_size);
                     // the center of the leaf is the position of the entity associated
                     other_indx = get_indx_loc(&tree->nodes[other].center, &other_center, &other_border);
-
+                    // double distance = get_distance(&tree->nodes[other].center, &ent->pos);
+                    // printf("ID: %d, other: %d, border: %lf, other_border: %lf, distance: %lf, indx: %d, other_indx: %d\n",id, other, border_size, other_border, distance, indx, other_indx);
+                    // printf("centerX: %lf, centerY: %lf, centerZ: %lf\notherX: %lf, otherY: %lf, otherZ: %lf\n", volume_center.x, volume_center.y, volume_center.z, other_center.x, other_center.y, other_center.z);
                     // use the new branch as the current one
                     node_indx = tree->firstfree;
                     node = &tree->nodes[node_indx];
