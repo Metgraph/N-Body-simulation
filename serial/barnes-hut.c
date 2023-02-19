@@ -104,7 +104,7 @@ void print_tree_rec(Octtree *tree, int id, char *space, uint depth){
     Octnode *node=&tree->nodes[id];
     //how much divide
     uint temp=1<<depth;
-    double border=(tree->max-tree->min)/(double)temp;
+    double border=(tree->max*2)/(double)temp;
     printf("%sid: %d, (x:%lf, y:%lf, z:%lf), border: %lf\n", space, id, node->center.x, node->center.y, node->center.z, border);
     if(node->ents>1){
 
@@ -150,9 +150,9 @@ Octnode *allocate_node(int parent)
 void update_max_min(double *max, double *min, RVec3 *val)
 {
     // update max
-    *max = val->x > *max ? val->x : *max;
-    *max = val->y > *max ? val->y : *max;
-    *max = val->z > *max ? val->z : *max;
+    *max = fabs(val->x) > *max ? fabs(val->x) : *max;
+    *max = fabs(val->y) > *max ? fabs(val->y) : *max;
+    *max = fabs(val->z) > *max ? fabs(val->z) : *max;
     // update min
     *min = val->x < *min ? val->x : *min;
     *min = val->y < *min ? val->y : *min;
@@ -221,13 +221,13 @@ void add_ent(Octtree *tree, Entity *ent, int id)
     // keep last visited node index
     node_indx = tree->root;
     node = &tree->nodes[node_indx];
-    border_size = tree->max - tree->min;
+    border_size = tree->max *2;
 
     // set center of whole volume
     //TODO wrong formula
-    volume_center.x = border_size / 2;
-    volume_center.y = border_size / 2;
-    volume_center.z = border_size / 2;
+    volume_center.x = 0;
+    volume_center.y = 0;
+    volume_center.z = 0;
 
     do
     {
