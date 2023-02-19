@@ -102,7 +102,10 @@ uint get_entities(char filename[], Entity **ents)
 
 void print_tree_rec(Octtree *tree, int id, char *space, uint depth){
     Octnode *node=&tree->nodes[id];
-    printf("%sid: %d, (x:%lf, y:%lf, z:%lf)\n", space, id, node->center.x, node->center.y, node->center.z);
+    //how much divide
+    uint temp=1<<depth;
+    double border=(tree->max-tree->min)/(double)temp;
+    printf("%sid: %d, (x:%lf, y:%lf, z:%lf), border: %lf\n", space, id, node->center.x, node->center.y, node->center.z, border);
     if(node->ents>1){
 
         
@@ -221,6 +224,7 @@ void add_ent(Octtree *tree, Entity *ent, int id)
     border_size = tree->max - tree->min;
 
     // set center of whole volume
+    //TODO wrong formula
     volume_center.x = border_size / 2;
     volume_center.y = border_size / 2;
     volume_center.z = border_size / 2;
@@ -478,7 +482,7 @@ void propagation(Entity ents[], int ents_sz, size_t t_start, size_t t_end, size_
     fpt = fopen(output, "w");
     for (size_t t = t_start; t < t_end; t += dt)
     {
-        fprintf(fpt, "time: %lu\n", t);
+        // fprintf(fpt, "time: %lu\n", t);
         add_ents(&tree, ents, ents_sz);
         set_branch_values(&tree);
         printf("time: %lu\n", t);
