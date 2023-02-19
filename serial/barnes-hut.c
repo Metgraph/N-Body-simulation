@@ -1,5 +1,5 @@
 // https://lewiscoleblog.com/barnes-hut
-//TODO fix propagation, bodies have strange move (probably it start when the quantity of branch increase)
+//TODO check if algorithm is okay, results are a bit different from exhaustive algorithm, but nothing strange
 
 #include <math.h>
 #include <stdio.h>
@@ -38,7 +38,7 @@ typedef struct
     int sz;        // number of total slot in array
     int firstfree; // first location free
     int root;
-    double min;
+    double min; //TODO remove min or update code and use min in the correct way
     double max;
     Octnode *nodes;
 } Octtree;
