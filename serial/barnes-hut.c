@@ -170,7 +170,7 @@ void default_max_min(double *max, double *min)
 // border_size contains the border size of the current branch volume (so the volume is border_size^3)
 uint get_indx_loc(RVec3 *pos, RVec3 *center, double *border_size)
 {
-        int index=0;
+    int index=0;
     double border4=*border_size/4;
     if(pos->x<center->x){
         center->x-= border4;
@@ -392,11 +392,11 @@ void get_bounding_box(Entity ents[], int ents_sz, double *max, double *min)
 // create tree struct and add root node
 void init_tree(Entity ents[], int ents_sz, Octtree *tree)
 {
-    get_bounding_box(ents, ents_sz, &tree->max, &tree->min);
+    // get_bounding_box(ents, ents_sz, &tree->max, &tree->min);
     // calculate the minimum quantity of branch required to save ents_sz bodies
-    int sz = (ents_sz - 2) / 3 + 1; // = round up (etns_sz-1)/3
+    int sz = (ents_sz - 2) / 3 + 1; // = round up (ents_sz-1)/3
     sz *= 2;                        // double the size to leave some space without need to reallocate
-    // add the space required for the bodyes
+    // add the space required for the bodies
     sz += ents_sz;
     tree->firstfree = ents_sz + 1;
     tree->sz = sz;
@@ -514,6 +514,7 @@ void propagation(Entity ents[], int ents_sz, size_t t_start, size_t t_end, size_
     for (size_t t = t_start; t < t_end; t += dt)
     {
         // fprintf(fpt, "time: %lu\n", t);
+        get_bounding_box(ents, ents_sz, &tree.max, &tree.min);
         add_ents(&tree, ents, ents_sz);
         set_branch_values(&tree);
         printf("time: %lu\n", t);

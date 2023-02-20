@@ -8,7 +8,7 @@ import sys
 file = open(sys.argv[1], "r")
 data = list(csv.reader(file, delimiter=","))
 file.close()
-scale_const=10e0
+scale_const=10e5
 
 #detect how many bodies there are
 n = float(0)
