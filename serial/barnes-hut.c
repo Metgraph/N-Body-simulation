@@ -215,6 +215,10 @@ void double_Octtree(Octtree *tree)
     tree->nodes=realloc(tree->nodes, tree->sz*sizeof(Octnode));
 }
 
+double border_tree(Octtree *tree){
+    return tree->max*2;
+}
+
 //set value for a empty node
 void init_node(Octnode *node)
 {
@@ -244,7 +248,7 @@ void add_ent(Octtree *tree, Entity *ent, int id)
     // keep last visited node index
     node_indx = tree->root;
     node = &tree->nodes[node_indx];
-    border_size = tree->max *2;
+    border_size = border_tree(tree);
 
     // set center of whole volume
     //TODO wrong formula
@@ -471,7 +475,7 @@ void get_acceleration(Octtree *tree, int id, RVec3 *acc)
     acc->x = 0;
     acc->y = 0;
     acc->z = 0;
-    get_acceleration_rec(tree, tree->root, id, acc, tree->max - tree->min);
+    get_acceleration_rec(tree, tree->root, id, acc, border_tree(tree));
 }
 
 void calculate_propagation(Entity ents[], int ents_sz, Octtree *tree, size_t dt, FILE *fpt)
