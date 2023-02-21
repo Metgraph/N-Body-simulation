@@ -38,7 +38,6 @@ typedef struct
     int sz;        // number of total slot in array
     int firstfree; // first location free
     int root;
-    double min; //TODO remove min or update code and use min in the correct way
     double max;
     Octnode *nodes;
 } Octtree;
@@ -147,22 +146,17 @@ Octnode *allocate_node(int parent)
     return ret;
 }
 
-void update_max_min(double *max, double *min, RVec3 *val)
+void update_max(double *max, RVec3 *val)
 {
     // update max
     *max = fabs(val->x) > *max ? fabs(val->x) : *max;
     *max = fabs(val->y) > *max ? fabs(val->y) : *max;
     *max = fabs(val->z) > *max ? fabs(val->z) : *max;
-    // update min
-    *min = val->x < *min ? val->x : *min;
-    *min = val->y < *min ? val->y : *min;
-    *min = val->z < *min ? val->z : *min;
 }
 
-void default_max_min(double *max, double *min)
+void default_max(double *max)
 {
     *max = DBL_MIN;
-    *min = DBL_MAX;
 }
 
 // get the index of branch where body will be placed.
@@ -170,43 +164,20 @@ void default_max_min(double *max, double *min)
 // border_size contains the border size of the current branch volume (so the volume is border_size^3)
 uint get_indx_loc(RVec3 *pos, RVec3 *center, double *border_size)
 {
-    int index=0;
-    double border4=*border_size/4;
-    if(pos->x<center->x){
-        center->x-= border4;
-    }else{
-        center->x+=border4;
-        index+=1;
-    }
-    if(pos->y<center->y){
-        center->y-= border4;
-    }else{
-        center->y+=border4;
-        index+=1*2;
-    }
-    if(pos->z<center->z){
-        center->z-= border4;
-    }else{
-        center->z+=border4;
-        index+=1*4;
-    }
-    *border_size/=2;
-    
-    return index;
-    // int indx;
-    // int x, y, z;
-    // z = pos->z >= center->z;
-    // y = pos->y >= center->y;
-    // x = pos->x >= center->x;
-    // indx = z * 4 + y * 2 + x;
-    // // used to calculate new center
-    // double bord_div4 = *border_size / 4;
-    // center->x += x ? bord_div4 : -(bord_div4); // double(x)*2*border_size - border_size
-    // center->y += y ? bord_div4 : -(bord_div4);
-    // center->z += z ? bord_div4 : -(bord_div4);
-    // *border_size /= 2;
+    int indx;
+    int x, y, z;
+    double bord_div4 = *border_size / 4;
+    z = pos->z >= center->z;
+    y = pos->y >= center->y;
+    x = pos->x >= center->x;
+    indx = z * 4 + y * 2 + x;
+    // used to calculate new center
+    center->x += x ? bord_div4 : -(bord_div4); // double(x)*2*border_size - border_size
+    center->y += y ? bord_div4 : -(bord_div4);
+    center->z += z ? bord_div4 : -(bord_div4);
+    *border_size /= 2;
 
-    // return indx;
+    return indx;
 }
 
 void double_Octtree(Octtree *tree)
@@ -380,19 +351,18 @@ void set_branch_values(Octtree *tree)
     }
 }
 
-void get_bounding_box(Entity ents[], int ents_sz, double *max, double *min)
+void get_bounding_box(Entity ents[], int ents_sz, double *max)
 {
-    default_max_min(max, min);
+    default_max(max);
     for (int i = 0; i < ents_sz; i++)
     {
-        update_max_min(max, min, &ents[i].pos);
+        update_max(max, &ents[i].pos);
     }
 }
 
 // create tree struct and add root node
 void init_tree(Entity ents[], int ents_sz, Octtree *tree)
 {
-    // get_bounding_box(ents, ents_sz, &tree->max, &tree->min);
     // calculate the minimum quantity of branch required to save ents_sz bodies
     int sz = (ents_sz - 2) / 3 + 1; // = round up (ents_sz-1)/3
     sz *= 2;                        // double the size to leave some space without need to reallocate
@@ -514,7 +484,7 @@ void propagation(Entity ents[], int ents_sz, size_t t_start, size_t t_end, size_
     for (size_t t = t_start; t < t_end; t += dt)
     {
         // fprintf(fpt, "time: %lu\n", t);
-        get_bounding_box(ents, ents_sz, &tree.max, &tree.min);
+        get_bounding_box(ents, ents_sz, &tree.max);
         add_ents(&tree, ents, ents_sz);
         set_branch_values(&tree);
         // printf("time: %lu\n", t);
