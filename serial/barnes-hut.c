@@ -517,9 +517,9 @@ void propagation(Entity ents[], int ents_sz, size_t t_start, size_t t_end, size_
         get_bounding_box(ents, ents_sz, &tree.max, &tree.min);
         add_ents(&tree, ents, ents_sz);
         set_branch_values(&tree);
-        printf("time: %lu\n", t);
-        print_tree(&tree);
-        printf("---------------------------------\n");
+        // printf("time: %lu\n", t);
+        // print_tree(&tree);
+        // printf("---------------------------------\n");
         calculate_propagation(ents, ents_sz, &tree, dt, fpt);
         //to reset the tree just reset the root and reset firstfree
         init_node(&tree.nodes[tree.root]);
