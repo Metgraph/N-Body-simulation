@@ -15,8 +15,8 @@ typedef struct
 
 typedef struct
 {
-    double *pos; //allocation size must be three times the size of mazz
-    double *vel; //allocation size must be three times the size of mazz
+    double *pos; //allocation size must be three times the size of mass
+    double *vel; //allocation size must be three times the size of mass
     double *mass;
 } Entities;
 
@@ -42,7 +42,7 @@ typedef struct
     // Octnodes
     uint *ents;
     double *mass;
-    RVec3 *center;
+    double *center; //allocation size must be three times the size of mass
     int *parent;
     int *children; // must have 8 slots for each node
 
@@ -160,7 +160,6 @@ __global__ void get_bounding_box(double *ents, int ents_sz, uint padding)
         ents[(blockIdx.x * blockDim.x)<<padding] = partial_max[0];
     }
 }
-
     // uint padding=0;
     // //over 3 cycles it will break
     // for(int temp_sz=sz; temp_sz>1; temp_sz=(temp_sz-1)/max_thread_block + 1){
@@ -170,3 +169,57 @@ __global__ void get_bounding_box(double *ents, int ents_sz, uint padding)
     //     cudaDeviceSynchronize();
     // }
     // //result will be at the begin of d_nums
+
+cudaError_t init_tree(Entities *ents, int ents_sz, Octtree *tree)
+{
+    // calculate the minimum quantity of branch required to save ents_sz bodies
+    cudaError_t err;
+    int sz = (ents_sz - 2) / 3 + 1; // = round up (ents_sz-1)/3
+    sz *= 2;                        // double the size to leave some space without need to reallocate
+    // add the space required for the bodies
+    sz += ents_sz;
+    tree->firstfree = ents_sz + 1;
+    tree->sz = sz;
+    tree->root = ents_sz;
+    // tree->nodes = malloc(sz * sizeof(Octnode));
+    err=cudaMalloc(&tree->center, sz * 3 * sizeof(double));
+    if(err!=cudaSuccess)
+        return err;
+
+    err=cudaMalloc(&tree->mass, sz * sizeof(double));
+    if(err!=cudaSuccess)
+        return err;
+
+    err=cudaMalloc(&tree->ents, sz * sizeof(uint));
+    if(err!=cudaSuccess)
+        return err;
+
+    err=cudaMalloc(&tree->children, sz * 8 * sizeof(int));
+    if(err!=cudaSuccess)
+        return err;
+
+    err=cudaMalloc(&tree->parent, sz * sizeof(int));
+    if(err!=cudaSuccess)
+        return err;
+
+    //TODO ERROR, tree pointers are in device memory
+    // Octnode root;
+    // root.center.x = 0;
+    tree->center[ents_sz*3]=0;
+    // root.center.y = 0;
+    tree->center[ents_sz*3+1]=0;
+    // root.center.z = 0;
+    tree->center[ents_sz*3+2]=0;
+    // root.mass = 0;
+    tree->mass[ents_sz]=0;
+    // root.parent = -1;
+    tree->parent[ents_sz]=-1;
+    // root.ents = 0;
+    tree->ents[ents_sz]=0;
+    for(int i=0; i<8; i++){
+        tree->children[ents_sz*8+i]=-1;
+    }
+    // tree->nodes[ents_sz] = root;
+    return cudaSuccess;
+}
+
