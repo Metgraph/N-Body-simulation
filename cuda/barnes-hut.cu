@@ -20,18 +20,19 @@ typedef struct
     double *mass;
 } Entities;
 
+
 // use int instead of uint for indexs so -1 can be used as a sort of null value
-/*
+//used to simplify code, not used in global memory
 typedef struct
 {
     uint ents; // entities in this section
     double mass;
-    RVec3 center;    // mass center
+    double center[3];    // mass center
     int parent;      // index of parent
     int children[8]; // indexs of children
 } Octnode;
 
-*/
+
 
 typedef struct
 {
@@ -125,6 +126,168 @@ uint get_entities(char filename[], Entities *ents)
     ents->mass = mass_ret;
     fclose(f);
     return size;
+}
+
+__device__ double border_tree(Octtree *tree){
+    return tree->max*2;
+}
+
+__device__ void init_node(Octtree *tree, int indx)
+{
+    tree->center[indx*3] = 0;
+    tree->center[indx*3+1] = 0;
+    tree->center[indx*3+2] = 0;
+    tree->mass[indx]=0;
+    tree->ents[indx]=0;
+    tree->parent[indx]=-1;
+    for (uint i = 0; i < 8; i++)
+    {
+        tree->children[indx*8+i] = -1;
+    }
+}
+
+//pos and center must point to the first axis of position
+__device__ int get_indx_loc(double *pos, double *center, double *border_size)
+{
+    int indx;
+    int x, y, z;
+    double bord_div4 = *border_size / 4;
+    z = pos[2] >= center[2];
+    y = pos[1] >= center[1];
+    x = pos[0] >= center[0];
+    indx = z * 4 + y * 2 + x;
+    // used to calculate new center
+    center[0] += x ? bord_div4 : -(bord_div4); // double(x)*2*border_size - border_size
+    center[1] += y ? bord_div4 : -(bord_div4);
+    center[2] += z ? bord_div4 : -(bord_div4);
+    *border_size /= 2;
+
+    return indx;
+}
+
+//add a entity in the tree
+//it's create all the needed branch
+__global__ void add_ent(Octtree *tree, Entities *ent, int id)
+{
+    // allocated is used as a boolean
+    int allocated, node_indx, indx, child_indx;
+    double border_size;
+    // Octnode node;
+    // set center of whole volume
+    double volume_center[3]={0,0,0};
+    // set init value
+    allocated = 0;
+
+    // keep last visited node index
+    node_indx = tree->root;
+    // node.ents = tree->ents[node_indx];
+    // node.center[0] = tree->ents[node_indx*3];
+    // node.center[1] = tree->ents[node_indx*3+1];
+    // node.center[2] = tree->ents[node_indx*3+2];
+    // for(int i=0; i<8; i++){
+    //     node.children[i] = tree->ents[node_indx*8+i];
+    // }
+    // node.mass = tree->mass[node_indx];
+    // node.parent = -1;
+
+    border_size = border_tree(tree);
+
+
+    do
+    {
+        // center and border_size are updated to the next branch value
+        indx = get_indx_loc(&ent->pos[id*3], volume_center, &border_size);
+        child_indx=node_indx*8+indx;
+        allocated = tree->children[child_indx] == -1;
+        if (allocated)
+        {
+            tree->children[child_indx] = id;
+        }
+        else
+        {
+            // if the location is occupied by a leaf (an entity)
+            if (tree->children[child_indx] < tree->root)
+            {
+                // other is the other leaf
+                double other_center[3];
+                other_center[0] = volume_center[0];
+                other_center[1] = volume_center[1];
+                other_center[2] = volume_center[2];
+                double other_border = border_size;
+                int other = tree->children[child_indx];
+                int other_indx;
+                do
+                {   
+                    //we will allocate whole memory
+                    // double space if tree is full
+                    // if (tree->firstfree >= tree->sz)
+                    // {
+                        
+                    //     // printf("ID: %d, other: %d, border: %lf, other_border: %lf, distance: %lf\n", id, other, border_size, other_border, distance);
+                    //     double_Octtree(tree);
+                    //     //update the pointer to new address
+                    //     node = &tree->nodes[node_indx];
+                    // }
+
+                    // take first free location and set the parent of the new branch
+                    init_node(tree, tree->firstfree);
+                    tree->parent[tree->firstfree] = node_indx;
+                    // set the new branch as child
+                    tree->children[child_indx] = tree->firstfree;
+
+                    // get leaves position in the new branch
+                    indx = get_indx_loc(&ent->pos[id*3], volume_center, &border_size);
+                    child_indx=node_indx*8+indx;
+                    // the center of the leaf is the position of the entity associated
+                    other_indx = get_indx_loc(&tree->center[other*3], other_center, &other_border);
+                    // double distance = get_distance(&tree->nodes[other].center, &ent->pos);
+                    // printf("ID: %d, other: %d, border: %lf, other_border: %lf, distance: %lf, indx: %d, other_indx: %d\n",id, other, border_size, other_border, distance, indx, other_indx);
+                    // printf("centerX: %lf, centerY: %lf, centerZ: %lf\notherX: %lf, otherY: %lf, otherZ: %lf\n", volume_center.x, volume_center.y, volume_center.z, other_center.x, other_center.y, other_center.z);
+                    // use the new branch as the current one
+                    node_indx = tree->firstfree;
+                    // update first free location
+                    tree->firstfree++;
+
+                    // if the leaves will be in different position exit the loop
+                } while (indx == other_indx);
+
+                // set new parent in the leaves values
+                tree->parent[other]= node_indx;
+                tree->parent[id] = node_indx;
+
+                // set the leaves as branch children
+                tree->children[child_indx] = id;
+                tree->children[node_indx*8+other_indx] = other;
+
+                allocated = 1;
+            }
+            else
+            {
+                // change current node to the child node
+                node_indx = node->children[indx];
+                node = &tree->nodes[node_indx];
+            }
+        }
+    } while (!allocated);
+
+    tree->nodes[id].center = ent->pos;
+    tree->nodes[id].mass = ent->mass;
+    tree->nodes[id].ents = 1;
+    tree->nodes[id].parent = node_indx;
+}
+
+__device__ void init_node(Octtree *tree, int indx)
+{
+    tree->center[indx*3]=0;
+    tree->center[indx*3+1]=0;
+    tree->center[indx*3+2]=0;
+    tree->mass[indx]=0;
+    tree->ents[indx]=0;
+    tree->ents[indx] = -1;
+    for (uint i = 0; i < 8; i++)
+    {
+        tree->children[indx*8+i] = -1;
+    }
 }
 
 // to check more than max_threads doubles check commented code below
