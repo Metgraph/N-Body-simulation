@@ -74,8 +74,6 @@ void count_entities_file(char *filename, uint *n){
  */
 void get_entities(char filename[], Entity **ents, uint *n_ents) {
     Entity e_buff;
-    uint ret_size;
-    uint size;
     Entity *ret_ptr;
     FILE *file;
 
