@@ -20,7 +20,8 @@ typedef struct {
 
 const double BIG_G = 6.67e-11;
 
-uint get_entities(char filename[], Entity **ents);
+void get_entities(char filename[], Entity **ents, uint *n_ents);
+void count_entities_file(char *filename, uint *n);
 void propagation(Entity ents[], uint ents_sz, size_t t_start, size_t t_end, size_t dt, const char *output);
 
 int main(int argc, char *argv[]) {
@@ -33,7 +34,7 @@ int main(int argc, char *argv[]) {
     Entity *ents;
     size_t start, end, dt;
 
-    n_ents = get_entities(argv[1], &ents);
+    get_entities(argv[1], &ents, &n_ents);
     start = strtoul(argv[2], NULL, 10);
     end = strtoul(argv[3], NULL, 10);
     dt = strtoul(argv[4], NULL, 10);
@@ -42,55 +43,71 @@ int main(int argc, char *argv[]) {
     free(ents);
 }
 
-// Read file and generate an array of Entity
-uint get_entities(char filename[], Entity **ents) {
+/**
+ * Estimate the number of bodies by counting the lines of the file
+ */
+void count_entities_file(char *filename, uint *n){
+    FILE *file;
+    char c;
+
+    file = fopen(filename, "r");
+    if (file == NULL){
+        fprintf(stderr, "Error opening file '%s'\n", filename);
+        exit(1);
+    }
+
+    *n = 0;
+    for (c = getc(file); c != EOF; c = getc(file))
+        if (c == '\n')
+            (*n)++;
+    fclose(file);
+    if (n == 0){
+        fprintf(stderr, "No bodies found into file. Closing\n");
+        exit(1);
+    } else {
+        (*n)++;
+    }
+}
+
+/**
+ * Read file and generate an array of Entity
+ */
+void get_entities(char filename[], Entity **ents, uint *n_ents) {
     Entity e_buff;
     uint ret_size;
     uint size;
-    Entity *ret;
-    FILE *file = fopen(filename, "r");
+    Entity *ret_ptr;
+    FILE *file;
 
+    count_entities_file(filename, n_ents);
+
+    file = fopen(filename, "r");
     if (!file) {
         fprintf(stderr, "Error opening file '%s'\n", filename);
         exit(1);
     }
 
-    ret = malloc(1 * sizeof(Entity));
-    if (ret == NULL){
+    *ents = malloc(*n_ents * sizeof(Entity));
+    if (*ents == NULL){
         fprintf(stderr, "Error during memory allocation\n");
         exit(2);
     }
 
-    size = 0;
-    ret_size = 1;
-    // fscanf return the number of input items successfully matched and assigned
+    ret_ptr = *ents;
     while ((fscanf(file, "%lf, %lf, %lf, %lf, %lf, %lf, %lf\n", &e_buff.pos.x,
                     &e_buff.pos.y, &e_buff.pos.z, &e_buff.vel.x,
                     &e_buff.vel.y, &e_buff.vel.z, &e_buff.mass)) == 7) {
-        size++;
-        if (ret_size < size) {
-            ret_size *= 2;
-            ret = realloc((void *)ret, ret_size * sizeof(Entity));
-            if (ret == NULL){
-                fprintf(stderr, "Error during memory allocation\n");
-                exit(2);
-            }
-        }
-        // Save value in first free location
-        ret[size - 1] = e_buff;
+        *ret_ptr++ = e_buff;
     }
-
     // check if while ended because the end of the file has been reached
     if (fgetc(file) != EOF) {
-        fprintf(stderr, "Error reading file '%s': file is not well formed\n",
-                filename);
+        fprintf(stderr, "Error while reading file '%s': file is not well formed\n", filename);
         fclose(file);
         exit(1);
     }
-
-    *ents = ret;
+    // Update n_ents with the correct number of scanned lines
+    *n_ents = ret_ptr - *ents;
     fclose(file);
-    return size;
 }
 
 void propagation(Entity ents[], uint ents_sz, size_t t_start, size_t t_end, size_t dt, const char *output) {
