@@ -268,9 +268,6 @@ void add_ent(Octtree *tree, Entity *ent, int id)
                     indx = get_indx_loc(&ent->pos, &volume_center, &border_size);
                     // the center of the leaf is the position of the entity associated
                     other_indx = get_indx_loc(&tree->nodes[other].center, &other_center, &other_border);
-                    // double distance = get_distance(&tree->nodes[other].center, &ent->pos);
-                    // printf("ID: %d, other: %d, border: %lf, other_border: %lf, distance: %lf, indx: %d, other_indx: %d\n",id, other, border_size, other_border, distance, indx, other_indx);
-                    // printf("centerX: %lf, centerY: %lf, centerZ: %lf\notherX: %lf, otherY: %lf, otherZ: %lf\n", volume_center.x, volume_center.y, volume_center.z, other_center.x, other_center.y, other_center.z);
                     // use the new branch as the current one
                     node_indx = tree->firstfree;
                     node = &tree->nodes[node_indx];
