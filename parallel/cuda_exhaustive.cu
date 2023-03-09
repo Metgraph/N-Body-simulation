@@ -1,18 +1,11 @@
 // https://en.wikipedia.org/wiki/N-body_simulation
+#include <cstdlib>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 #include <cuda.h>
 #include <cuda_runtime_api.h>
-
-#define CUDA_CHECK_RETURN(value){ \
-    cudaError_t_m_cudaStat = value; \
-    if(_m_cudaStat!=cudaSuccess){ \
-    fprintf(stderr,"Error %s at line %d infile %s\n",\
-        cudaGetErrorString(_m_cudaStat), __LINE__,__FILE__); \
-    exit(1); \
-    }}
 
 typedef unsigned int uint;
 
@@ -57,9 +50,10 @@ int main(int argc, char *argv[]) {
 }
 
 __host__
-void print_error(cudaError_t error, int i) {
+void cuda_check_error(cudaError_t error) {
     if (error != cudaSuccess) {
-        fprintf(stderr, "Error: %s, id: %d\n", cudaGetErrorString(error), i);
+        fprintf(stderr, "Error: %s\n", cudaGetErrorString(error));
+        exit(EXIT_FAILURE);
     }
 }
 
@@ -71,35 +65,45 @@ void run(double *h_masses, double *h_positions, double *h_velocities, uint ents_
     double *d_positions;
     double *d_velocities;
 
-    // TODO: check errori
     error = cudaMalloc((void **)&d_masses, ents_sz * sizeof(double));
-    print_error(error, 1);
+    cuda_check_error(error);
     error = cudaMalloc((void **)&d_positions, ents_sz * 3 * sizeof(double));
-    print_error(error, 2);
+    cuda_check_error(error);
     error = cudaMalloc((void **)&d_velocities, ents_sz * 3 * sizeof(double));
-    print_error(error, 3);
+    cuda_check_error(error);
 
-    error = cudaMemcpy(d_masses, h_masses, ents_sz, cudaMemcpyHostToDevice);
-    print_error(error, 4);
-    error = cudaMemcpy(d_positions, h_positions, ents_sz * 3, cudaMemcpyHostToDevice);
-    print_error(error, 5);
-    error = cudaMemcpy(d_velocities, h_velocities, ents_sz * 3, cudaMemcpyHostToDevice);
-    print_error(error, 6);
+    error = cudaMemcpy(d_masses, h_masses, ents_sz * sizeof(double), cudaMemcpyHostToDevice);
+    cuda_check_error(error);
+    error = cudaMemcpy(d_positions, h_positions, ents_sz * 3 * sizeof(double), cudaMemcpyHostToDevice);
+    cuda_check_error(error);
+    error = cudaMemcpy(d_velocities, h_velocities, ents_sz * 3 * sizeof(double), cudaMemcpyHostToDevice);
+    cuda_check_error(error);
+
+//    printf("\nDEBUG: valori letti - parte c\n");
+//    for (size_t entity_idx = 0; entity_idx < ents_sz; entity_idx++) {
+//        fprintf(stderr,  "%lu,%lf,%lf,%lf,%lf,%lf,%lf\n",
+//            entity_idx,
+//            h_positions[entity_idx*3    ],
+//            h_positions[entity_idx*3 + 1],
+//            h_positions[entity_idx*3 + 2],
+//            h_velocities[entity_idx*3    ],
+//            h_velocities[entity_idx*3 + 1],
+//            h_velocities[entity_idx*3 + 2]
+//            );
+//    }
 
     fpt = fopen(output, "w");
-    for(size_t t = t_start; t<t_end; t+=dt) { //Ciclo sul tempo
+    for(size_t t = t_start; t < t_end; t += dt) { //Ciclo sul tempo
         propagation<<<1, 1>>>(d_masses, d_positions, d_velocities, ents_sz, (double) dt);
         cudaDeviceSynchronize();
         update_positions<<<1, 1>>>(d_positions, d_velocities, ents_sz, (double) dt);
         cudaDeviceSynchronize();
 
         // memcopy da device a host
-        error = cudaMemcpy(h_masses, d_masses, ents_sz, cudaMemcpyDeviceToHost);
-        print_error(error, 7);
-        error = cudaMemcpy(h_positions, d_positions, ents_sz * 3, cudaMemcpyDeviceToHost);
-        print_error(error, 8);
-        error = cudaMemcpy(h_velocities, d_velocities, ents_sz * 3, cudaMemcpyDeviceToHost);
-        print_error(error, 9);
+        error = cudaMemcpy(h_positions, d_positions, ents_sz * 3 * sizeof(double), cudaMemcpyDeviceToHost);
+        cuda_check_error(error);
+        error = cudaMemcpy(h_velocities, d_velocities, ents_sz * 3 * sizeof(double), cudaMemcpyDeviceToHost);
+        cuda_check_error(error);
 
         write_positions(h_positions, h_velocities, ents_sz, fpt);
     }
@@ -197,19 +201,22 @@ void get_entities(char filename[], uint *n_ents, double **masses, double **posit
 
 __global__
 void propagation(double *masses, double *positions, double *velocities, uint ents_sz, double dt) {
-    const unsigned int tid = threadIdx.x;
-    printf("Thread id: %u\n", tid);
-    printf("%lf,%lf,%lf,%lf,%lf,%lf,%lf \n", masses[0], positions[0], positions[1], positions[2], velocities[0], velocities[1], velocities[3]);
-//    for (int i=0; i < ents_sz; i++){
-//            printf("%u,%lf,%lf,%lf,%lf,%lf,%lf \n", i,
-//                positions[i*3],
-//                positions[i*3+1],
-//                positions[i*3+2],
-//                velocities[i*3],
-//                velocities[i*3+1],
-//                velocities[i*3+2]
-//                );
-//    }
+    //const unsigned int tid = threadIdx.x;
+    /* printf("Thread id: %u\n", tid); */
+    /* printf("%lf,%lf,%lf,%lf,%lf,%lf,%lf \n", masses[0], positions[0], positions[1], positions[2], velocities[0], velocities[1], velocities[3]); */
+    printf("DEBUG: dati inizio kernel\n");
+    for (int i=0; i < ents_sz; i++){
+            printf("%u,%lf,%lf,%lf,%lf,%lf,%lf \n",
+                i,
+                positions[i*3],
+                positions[i*3+1],
+                positions[i*3+2],
+                velocities[i*3],
+                velocities[i*3+1],
+                velocities[i*3+2]
+                );
+    }
+    printf("DEBUG: delta: %f, #ents: %u\n", dt, ents_sz);
 
     for (size_t m1_idx = 0; m1_idx < ents_sz; m1_idx++) { //Fisso un corpo
         RVec3 a_g = {0, 0, 0}; //vettore di appoggio
@@ -220,40 +227,41 @@ void propagation(double *masses, double *positions, double *velocities, uint ent
                 r_vector.x = positions[m1_idx*3  ] - positions[m2_idx*3  ];
                 r_vector.y = positions[m1_idx*3+1] - positions[m2_idx*3+1];
                 r_vector.z = positions[m1_idx*3+2] - positions[m2_idx*3+2];
+                printf("DEBUG: Rvector: x: %f, y: %f, z: %f\n", r_vector.x, r_vector.y, r_vector.x);
 
                 // distanza tra i due corpi
                 double r_mag = sqrt(r_vector.x * r_vector.x + r_vector.y * r_vector.y + r_vector.z * r_vector.z);
-
-                double acceleration = -1.0 * BIG_G * masses[m2_idx] / pow(r_mag, 2.0);
+                double pow_R_mag = pow(r_mag, 2.0);
+                double acceleration = -1.0 * BIG_G * masses[m2_idx] / pow_R_mag;
+                printf("DEBUG: BIG G: %f, masses m2: %f\n", BIG_G, masses[m2_idx]);
+                printf("DEBUG: Pow_R_mag: %f, R_mag: %f, Acc: %f\n", pow_R_mag, r_mag, acceleration);
 
                 r_vector.x = r_vector.x / r_mag; // Uso la stessa variabile invece di una nuova
                 r_vector.y = r_vector.y / r_mag;
                 r_vector.z = r_vector.z / r_mag;
+                printf("DEBUG: updated vector Rvector: x: %f, y: %f, z: %f\n", r_vector.x, r_vector.y, r_vector.x);
 
                 a_g.x += acceleration * r_vector.x;
                 a_g.y += acceleration * r_vector.y;
                 a_g.z += acceleration * r_vector.z;
+                printf("DEBUG: a_g fine ciclo interno: x: %f, y: %f, z: %f\n", a_g.x, a_g.y, a_g.z);
             }
         }
         velocities[m1_idx*3    ] += a_g.x * dt;
         velocities[m1_idx*3 + 1] += a_g.y * dt;
         velocities[m1_idx*3 + 2] += a_g.z * dt;
+        printf("DEBUG: Update velocities, end kernel: %f, %f, %f\n", velocities[m1_idx*3], velocities[m1_idx*3 + 1], velocities[m1_idx*3 + 2]);
         }
 }
 
 __global__
 void update_positions(double *positions, double *velocities, uint ents_sz, double dt) {
+    printf("DEBUG: Into Kernel for updating new position\n");
     for (size_t entity_idx = 0; entity_idx < ents_sz; entity_idx++) {
         positions[entity_idx*3    ] += velocities[entity_idx*3    ] * dt;
         positions[entity_idx*3 + 1] += velocities[entity_idx*3 + 1] * dt;
         positions[entity_idx*3 + 2] += velocities[entity_idx*3 + 2] * dt;
-    }
-}
-
-__host__
-void write_positions(double *positions, double *velocities, uint ents_sz, FILE *fpt){
-    for (size_t entity_idx = 0; entity_idx < ents_sz; entity_idx++) {
-        fprintf(fpt,  "%u,%lf,%lf,%lf,%lf,%lf,%lf \n",
+        printf("%lu,%lf,%lf,%lf,%lf,%lf,%lf\n",
             entity_idx,
             positions[entity_idx*3    ],
             positions[entity_idx*3 + 1],
@@ -264,3 +272,19 @@ void write_positions(double *positions, double *velocities, uint ents_sz, FILE *
             );
     }
 }
+
+__host__
+void write_positions(double *positions, double *velocities, uint ents_sz, FILE *fpt){
+    for (size_t entity_idx = 0; entity_idx < ents_sz; entity_idx++) {
+        fprintf(fpt,  "%lu,%lf,%lf,%lf,%lf,%lf,%lf\n",
+            entity_idx,
+            positions[entity_idx*3    ],
+            positions[entity_idx*3 + 1],
+            positions[entity_idx*3 + 2],
+            velocities[entity_idx*3    ],
+            velocities[entity_idx*3 + 1],
+            velocities[entity_idx*3 + 2]
+            );
+    }
+}
+
