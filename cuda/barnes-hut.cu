@@ -291,7 +291,7 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz)
 //TODO write a more optimized function
 __global__ void get_bounding_box(double *g_idata, int ents_sz, double *g_odata)
 {
-    extern __shared__ double sdata[];
+    __shared__ double sdata[1024];
     // perform first level of reduction,
     // reading from global memory, writing to shared memory
     uint tid = threadIdx.x;
@@ -328,6 +328,7 @@ __global__ void get_bounding_box(double *g_idata, int ents_sz, double *g_odata)
     // write result for this block to global mem
     if (tid == 0)
     {
+
         g_odata[blockIdx.x] = sdata[0];
     }
 }
@@ -415,8 +416,7 @@ __global__ void set_branch_values(Octtree *tree)
     }
 }
 
-// each thread calculate acceleration from one body
-// after will be executed a reduce on the sum of acc
+
 __device__ void calculate_acceleration(double *pos_node, double mass_node, double *pos_ent, double mass_ent,
                                        double acc[])
 {
@@ -598,7 +598,8 @@ __global__ void set_tree(Octtree *tree)
     }
 }
 
-// TODO add argument to reserve cache where to save data without send them every loop
+
+// TODO check errors from malloc and kernels
 int main(int argc, char *argv[])
 {
     // opt_thread is value to optimize
@@ -608,7 +609,7 @@ int main(int argc, char *argv[])
     // *_e* memory for entity data
     // *_t* memory for tree data
     // h_le* (host) memory locked for entity data copies
-    double *d_epos, *d_evel, *d_emass, *d_tcenter, *d_tmass, *h_lepos, *h_level;
+    double *d_epos, *d_evel, *d_emass, *d_tcenter, *d_tmass, *h_lepos, *h_level, *d_reduce1, *d_reduce2;
     Entities h_ents_struct, *d_ents_struct, h_ents_cpy;
     Octtree h_tree_cpy, *d_tree;
     size_t start, end, dt;
@@ -649,6 +650,17 @@ int main(int argc, char *argv[])
     cudaMalloc(&d_tents, sizeof(uint) * sz);
     cudaMalloc(&d_tparent, sizeof(uint) * sz);
     cudaMalloc(&d_tchildren, sizeof(uint) * sz * 8);
+    if(n_ents>1024*2){
+        cudaMalloc(&d_reduce1, sizeof(double)*((n_ents*3-1)/1024+1));
+    }else{
+        //the final destination of result is the tree attribute max
+        //need to be defined also here because first reduction is out of the loop (if loop will be executed, the program will not enter this branch)
+        d_reduce1=&d_tree->max;
+    }
+    if(n_ents>1024*2*1024*2){
+        cudaMalloc(&d_reduce2, sizeof(double)*((n_ents*3-1)/1024/1024+1));
+
+    }
 
     // initialize struct to be copied in vram
     h_ents_cpy.pos = d_epos;
@@ -674,23 +686,36 @@ int main(int argc, char *argv[])
     // TODO recalculate thread and block size
     for (size_t t = start; t < end; t += dt)
     {
+        double *d_reduce_in, *d_reduce_out, *temp_swap;
         block.x = 32;
         block.y = 6;
         set_tree<<<1, block>>>(d_tree);
         uint ents = n_ents;
-        while (ents > 1)
-        {
-            // TODO work on padding
-            uint blocks = (ents - 1) / 1024 + 1;
-            get_bounding_box<<<blocks, 1024>>>(d_ents_struct->pos, ents, padding);
+        get_bounding_box<<<(sz-1)/(1024*2)+1,1024>>>(d_epos, sz, d_reduce1);
+        cudaDeviceSynchronize();
+        d_reduce_in=d_reduce2;
+        d_reduce_out=d_reduce1;
+        for(int temp_sz=(sz-1)/(1024*2)+1; temp_sz>1; temp_sz=(temp_sz-1)/(1024*2)+1){
+            if(temp_sz<=1024*2){
+                temp_swap=d_reduce_in;
+                d_reduce_in=d_reduce_out;
+                d_reduce_out=temp_swap;
+
+            }else{
+                d_reduce_in=d_reduce_out;
+                //the final destination of result is the tree attribute max
+                d_reduce_out=&d_tree->max;
+            }
+
+            get_bounding_box<<<(sz-1)/(1024*2)+1,1024>>>(d_reduce_in, sz, d_reduce_out);
             cudaDeviceSynchronize();
-            blocks = ents;
         }
+
         add_ent<<<opt_block, opt_thread>>>(d_tree, d_ents_struct, n_ents);
         cudaDeviceSynchronize();
         set_branch_values<<<opt_block, opt_thread>>>(d_tree);
         cudaDeviceSynchronize();
-        get_acceleration<<<opt_block, opt_thread>>>(d_tree, n_ents, n_ents, dt);
+        get_acceleration<<<opt_block, opt_thread>>>(d_tree, d_ents_struct, n_ents, dt);
         cudaDeviceSynchronize();
         cudaMemcpy(h_level, d_evel, sizeof(double) * n_ents * 3, cudaMemcpyDeviceToHost);
         cudaMemcpy(h_lepos, d_epos, sizeof(double) * n_ents * 3, cudaMemcpyDeviceToHost);
@@ -708,4 +733,11 @@ int main(int argc, char *argv[])
     cudaFree(d_tents);
     cudaFree(d_tparent);
     cudaFree(d_tchildren);
+    if(n_ents>1024*2){
+        cudaFree(d_reduce1);
+    }
+    if(n_ents>1024*2*1024*2){
+        cudaFree(d_reduce2);
+
+    }
 }
