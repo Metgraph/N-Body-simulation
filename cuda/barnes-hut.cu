@@ -296,20 +296,21 @@ __global__ void get_bounding_box(double *g_idata, int ents_sz, double *g_odata)
     // reading from global memory, writing to shared memory
     uint tid = threadIdx.x;
     uint space = (blockDim.x);
+    uint id = blockIdx.x * blockDim.x + threadIdx.x;
     uint i = (blockIdx.x * (blockDim.x * 2) + threadIdx.x);
 
     //if thread are more than values give them a 0 value
     //the first if has no divergence, becuase threads have same ents_sz value
     if(ents_sz%2==0){
-        if(i<ents_sz/2){
+        if(id<ents_sz/2){
             sdata[tid] = fabs(g_idata[i]) > fabs(g_idata[i + space]) ? fabs(g_idata[i]) : fabs(g_idata[i + space]);
         }else{
             sdata[tid] = 0;
         }
     }else{
-        if(i<ents_sz-1/2+1){
+        if(id<ents_sz-1/2+1){
             // the condition after the or is if it is the last element, and since ents_sz is odd, the last thread has only a value instead of 2
-            sdata[tid] = fabs(g_idata[i]) > fabs(g_idata[i + space]) || i==ents_sz? fabs(g_idata[i]) : fabs(g_idata[i + space]);
+            sdata[tid] = fabs(g_idata[i]) > fabs(g_idata[i + space]) || id==ents_sz/2 ? fabs(g_idata[i]) : fabs(g_idata[i + space]);
         }else{
             sdata[tid] = 0;
         }
