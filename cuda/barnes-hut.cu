@@ -22,7 +22,6 @@ typedef struct
     double *mass;
 } Entities;
 
-
 typedef struct
 {
     int firstfree; // first location free
@@ -42,7 +41,7 @@ const double THETA = 0.5; // 1;
 // TODO check from version
 const int max_thread_block = 1024;
 
-//a lot of optimization like use shift instead of multiplication will be made by compiler
+// a lot of optimization like use shift instead of multiplication will be made by compiler
 
 // TODO put in a common file
 uint get_entities(char filename[], Entities *ents)
@@ -288,7 +287,7 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz)
     }
 }
 
-//TODO write a more optimized function
+// TODO write a more optimized function
 __global__ void get_bounding_box(double *g_idata, int ents_sz, double *g_odata)
 {
     __shared__ double sdata[1024];
@@ -299,19 +298,28 @@ __global__ void get_bounding_box(double *g_idata, int ents_sz, double *g_odata)
     uint id = blockIdx.x * blockDim.x + threadIdx.x;
     uint i = (blockIdx.x * (blockDim.x * 2) + threadIdx.x);
 
-    //if thread are more than values give them a 0 value
-    //the first if has no divergence, becuase threads have same ents_sz value
-    if(ents_sz%2==0){
-        if(id<ents_sz/2){
+    // if thread are more than values give them a 0 value
+    // the first if has no divergence, becuase threads have same ents_sz value
+    if (ents_sz % 2 == 0)
+    {
+        if (id < ents_sz / 2)
+        {
             sdata[tid] = fabs(g_idata[i]) > fabs(g_idata[i + space]) ? fabs(g_idata[i]) : fabs(g_idata[i + space]);
-        }else{
+        }
+        else
+        {
             sdata[tid] = 0;
         }
-    }else{
-        if(id<ents_sz-1/2+1){
+    }
+    else
+    {
+        if (id < ents_sz - 1 / 2 + 1)
+        {
             // the condition after the or is if it is the last element, and since ents_sz is odd, the last thread has only a value instead of 2
-            sdata[tid] = fabs(g_idata[i]) > fabs(g_idata[i + space]) || id==ents_sz/2 ? fabs(g_idata[i]) : fabs(g_idata[i + space]);
-        }else{
+            sdata[tid] = fabs(g_idata[i]) > fabs(g_idata[i + space]) || id == ents_sz / 2 ? fabs(g_idata[i]) : fabs(g_idata[i + space]);
+        }
+        else
+        {
             sdata[tid] = 0;
         }
     }
@@ -416,56 +424,65 @@ __global__ void set_branch_values(Octtree *tree)
     }
 }
 
-//here tree->parent will be used to store the "s", the position where to write values (tree->parent is not needed anymore)
-__global__ void order_ents(Octtree *tree, int *sorted){
-    uint id = threadIdx.x + blockIdx.x*blockDim.x;
-	uint stride = blockDim.x*gridDim.x;
-	uint offset = 0;
-    const int root= tree->root;
+// here tree->parent will be used to store the "s", the position where to write values (tree->parent is not needed anymore)
+__global__ void order_ents(Octtree *tree, int *sorted)
+{
+    uint id = threadIdx.x + blockIdx.x * blockDim.x;
+    uint stride = blockDim.x * gridDim.x;
+    uint offset = 0;
+    const int root = tree->root;
 
-    //s is the position in the array where to write the body
-	int s = 0;
-	if(threadIdx.x == 0){
-		for(int i=0;i<8;i++){
-			int node = tree->children[i*root*8];
+    // s is the position in the array where to write the body
+    int s = 0;
+    if (threadIdx.x == 0)
+    {
+        for (int i = 0; i < 8; i++)
+        {
+            int node = tree->children[i * root * 8];
 
-			if(node >= root){  // not a leaf node
-				tree->parent[node] = s;
-				s += tree->ents[node];
-			}
-			else if(node >= 0){  // leaf node
-				sorted[s] = node;
-				s++;
-			}
-		}
+            if (node >= root)
+            { // not a leaf node
+                tree->parent[node] = s;
+                s += tree->ents[node];
+            }
+            else if (node >= 0)
+            { // leaf node
+                sorted[s] = node;
+                s++;
+            }
+        }
         __threadfence();
-	}
+    }
 
-	int cell = root + id;
-	int tree_sz = tree->firstfree;
-	while((cell + offset) < tree_sz){
-		s = tree->parent[cell + offset];
-	
-		if(s >= 0){
+    int cell = root + id;
+    int tree_sz = tree->firstfree;
+    while ((cell + offset) < tree_sz)
+    {
+        s = tree->parent[cell + offset];
 
-			for(int i=0;i<8;i++){
-				int node = tree->children[8*(cell+offset) + i];
+        if (s >= 0)
+        {
 
-				if(node >= root){  // not a leaf node
-					tree->parent[node] = s;
-					s += tree->ents[node];
-				}
-				else if(node >= 0){  // leaf node
-					sorted[s] = node;
-					s++;
-				}
-			}
-			offset += stride;
+            for (int i = 0; i < 8; i++)
+            {
+                int node = tree->children[8 * (cell + offset) + i];
+
+                if (node >= root)
+                { // not a leaf node
+                    tree->parent[node] = s;
+                    s += tree->ents[node];
+                }
+                else if (node >= 0)
+                { // leaf node
+                    sorted[s] = node;
+                    s++;
+                }
+            }
+            offset += stride;
             __threadfence();
-		}
-	}
+        }
+    }
 }
-
 
 __device__ void calculate_acceleration(double *pos_node, double mass_node, double *pos_ent, double mass_ent,
                                        double acc[])
@@ -648,8 +665,17 @@ __global__ void set_tree(Octtree *tree)
     }
 }
 
+void print_values(double *pos, double *vel, int ents_sz, FILE *fpt)
+{
+    for (int entity_idx = 0; entity_idx < ents_sz; entity_idx++)
+    {
+        fprintf(fpt, "%u,%lf,%lf,%lf,%lf,%lf,%lf \n", entity_idx, pos[entity_idx * 3],
+                pos[entity_idx * 3 + 1], pos[entity_idx * 3 + 2], vel[entity_idx * 3], vel[entity_idx * 3 + 1],
+                vel[entity_idx * 3 + 2]);
+    }
+}
 
-// TODO check errors from malloc and kernels
+// TODO check errors from malloc and kernels and fopen
 int main(int argc, char *argv[])
 {
     // opt_thread is value to optimize
@@ -700,17 +726,20 @@ int main(int argc, char *argv[])
     cudaMalloc(&d_tents, sizeof(uint) * sz);
     cudaMalloc(&d_tparent, sizeof(uint) * sz);
     cudaMalloc(&d_tchildren, sizeof(uint) * sz * 8);
-    cudaMalloc(&d_sorted_ents, sizeof(int)*n_ents);
-    if(n_ents>1024*2){
-        cudaMalloc(&d_reduce1, sizeof(double)*((n_ents*3-1)/1024+1));
-    }else{
-        //the final destination of result is the tree attribute max
-        //need to be defined also here because first reduction is out of the loop (if loop will be executed, the program will not enter this branch)
-        d_reduce1=&d_tree->max;
+    cudaMalloc(&d_sorted_ents, sizeof(int) * n_ents);
+    if (n_ents > 1024 * 2)
+    {
+        cudaMalloc(&d_reduce1, sizeof(double) * ((n_ents * 3 - 1) / 1024 + 1));
     }
-    if(n_ents>1024*2*1024*2){
-        cudaMalloc(&d_reduce2, sizeof(double)*((n_ents*3-1)/1024/1024+1));
-
+    else
+    {
+        // the final destination of result is the tree attribute max
+        // need to be defined also here because first reduction is out of the loop (if loop will be executed, the program will not enter this branch)
+        d_reduce1 = &d_tree->max;
+    }
+    if (n_ents > 1024 * 2 * 1024 * 2)
+    {
+        cudaMalloc(&d_reduce2, sizeof(double) * ((n_ents * 3 - 1) / 1024 / 1024 + 1));
     }
 
     // initialize struct to be copied in vram
@@ -735,6 +764,7 @@ int main(int argc, char *argv[])
     free(h_ents_struct.vel);
     free(h_ents_struct.mass);
     // TODO recalculate thread and block size
+    FILE *fpt = fopen(argv[5], "w");
     for (size_t t = start; t < end; t += dt)
     {
         double *d_reduce_in, *d_reduce_out, *temp_swap;
@@ -742,23 +772,26 @@ int main(int argc, char *argv[])
         block.y = 6;
         set_tree<<<1, block>>>(d_tree);
         uint ents = n_ents;
-        get_bounding_box<<<(sz-1)/(1024*2)+1,1024>>>(d_epos, sz, d_reduce1);
+        get_bounding_box<<<(sz - 1) / (1024 * 2) + 1, 1024>>>(d_epos, sz, d_reduce1);
         cudaDeviceSynchronize();
-        d_reduce_in=d_reduce2;
-        d_reduce_out=d_reduce1;
-        for(int temp_sz=(sz-1)/(1024*2)+1; temp_sz>1; temp_sz=(temp_sz-1)/(1024*2)+1){
-            if(temp_sz<=1024*2){
-                temp_swap=d_reduce_in;
-                d_reduce_in=d_reduce_out;
-                d_reduce_out=temp_swap;
-
-            }else{
-                d_reduce_in=d_reduce_out;
-                //the final destination of result is the tree attribute max
-                d_reduce_out=&d_tree->max;
+        d_reduce_in = d_reduce2;
+        d_reduce_out = d_reduce1;
+        for (int temp_sz = (sz - 1) / (1024 * 2) + 1; temp_sz > 1; temp_sz = (temp_sz - 1) / (1024 * 2) + 1)
+        {
+            if (temp_sz <= 1024 * 2)
+            {
+                temp_swap = d_reduce_in;
+                d_reduce_in = d_reduce_out;
+                d_reduce_out = temp_swap;
+            }
+            else
+            {
+                d_reduce_in = d_reduce_out;
+                // the final destination of result is the tree attribute max
+                d_reduce_out = &d_tree->max;
             }
 
-            get_bounding_box<<<(sz-1)/(1024*2)+1,1024>>>(d_reduce_in, sz, d_reduce_out);
+            get_bounding_box<<<(sz - 1) / (1024 * 2) + 1, 1024>>>(d_reduce_in, sz, d_reduce_out);
             cudaDeviceSynchronize();
         }
 
@@ -772,8 +805,10 @@ int main(int argc, char *argv[])
         cudaDeviceSynchronize();
         cudaMemcpy(h_level, d_evel, sizeof(double) * n_ents * 3, cudaMemcpyDeviceToHost);
         cudaMemcpy(h_lepos, d_epos, sizeof(double) * n_ents * 3, cudaMemcpyDeviceToHost);
+        print_values(h_lepos, h_level, n_ents, fpt);
     }
 
+    fclose(fpt);
     cudaFreeHost(h_lepos);
     cudaFreeHost(h_level);
     cudaFree(d_ents_struct);
@@ -787,11 +822,12 @@ int main(int argc, char *argv[])
     cudaFree(d_tparent);
     cudaFree(d_tchildren);
     cudaFree(d_sorted_ents);
-    if(n_ents>1024*2){
+    if (n_ents > 1024 * 2)
+    {
         cudaFree(d_reduce1);
     }
-    if(n_ents>1024*2*1024*2){
+    if (n_ents > 1024 * 2 * 1024 * 2)
+    {
         cudaFree(d_reduce2);
-
     }
 }
