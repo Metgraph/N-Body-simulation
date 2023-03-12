@@ -181,7 +181,7 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz)
         // set init value
         allocated = 0;
 
-        copy_arrs3(pos_ent,&ent->pos[id * 3],0);
+        copy_arrs3(pos_ent, &ent->pos[id * 3], 0);
 
         // keep last visited node index
         node_indx = tree->root;
@@ -291,7 +291,7 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz)
 // TODO write a more optimized function
 __global__ void get_bounding_box(double *g_idata, int ents_sz, double *g_odata)
 {
-    __shared__ double sdata[1024];
+    extern __shared__ double sdata[];
     // perform first level of reduction,
     // reading from global memory, writing to shared memory
     uint tid = threadIdx.x;
@@ -514,22 +514,26 @@ __device__ double get_distance(double *r1, double *r2)
 
 // TODO children must be compacted at the start of array
 // TODO remove id_in_warp, call bidimensional kernel
-__global__ void get_acceleration(Octtree *tree, Entities *ents, int ents_sz, size_t dt)
+__global__ void get_acceleration(Octtree *tree, Entities *ents, int ents_sz, size_t dt, uint shared_sz)
 {
     uint threads_sz = gridDim.x * blockDim.x;
     uint tid;
     // 1024*48 is the total shared memory, remove space taken from double and from cache_node, divide for 32 (number of warps)
-    int id_in_warp, curr_node, depth, *my_stack, warp_id, stack_level;
+    int id_in_warp, curr_node, depth, *my_stack, warp_id, stack_level, warps_sz;
     double pos_ent[3], mass_ent, border, acc_ent[3], ddt;
-    __shared__ double pos_node[3 * 32], mass_node[32];
+    warps_sz = blockDim.y;
+    extern __shared__ void *shared_mem;
+    double *pos_node = (double *)shared_mem;
+    double *mass_node = (pos_node + 3 * warps_sz * sizeof(double));
+    int *cache_node = (int *)(mass_node + warps_sz * sizeof(double));
+    int *stack = (cache_node + warps_sz * sizeof(int));
 
-    const int cache_sz = 1024 * 46/4;
-    __shared__ int cache_node[32], stack[cache_sz];
-    tid = threadIdx.x;
-    id_in_warp = tid % 32;
+    const int cache_sz = shared_sz - 3 * warps_sz * sizeof(double) - warps_sz * sizeof(double) - warps_sz * sizeof(int);
+    tid = threadIdx.x + threadIdx.y * blockDim.x;
+    id_in_warp = threadIdx.x;
     border = tree->max * 2;
-    warp_id = tid / 32;
-    my_stack = &stack[cache_sz / 32 * warp_id];
+    warp_id = threadIdx.y;
+    my_stack = &stack[cache_sz / warps_sz * warp_id];
     ddt = (double)dt;
 
     // root is the first node located after the leaves, so each id must be an id of a leaf
@@ -670,15 +674,40 @@ void print_values(double *pos, double *vel, int ents_sz, FILE *fpt)
     }
 }
 
+// tot_threads is the minimum number of threads to be reach
+// if tot_threads is 0 choose the maximum number of thread
+void get_opt_grid(cudaDeviceProp *prop, uint tot_threads, uint regs_sz, uint *blocks_sz, uint *threads_sz)
+{
+    uint temp_block, temp_thread;
+    temp_thread = prop->maxThreadsPerMultiProcessor / prop->maxBlocksPerMultiProcessor; // calculate value
+    if (temp_thread * regs_sz > prop->regsPerMultiprocessor / prop->maxBlocksPerMultiProcessor)
+    {
+        temp_thread=prop->regsPerMultiprocessor / prop->maxBlocksPerMultiProcessor/regs_sz;
+
+    }
+    if(tot_threads==0){
+        temp_block= prop->maxBlocksPerMultiProcessor*prop->multiProcessorCount;
+    }else{
+        temp_block = (tot_threads - 1) / temp_thread + 1;
+
+    }
+
+    *blocks_sz=temp_block;
+    *threads_sz=temp_thread;
+}
+
 // TODO check errors from malloc and kernels and fopen
-//TODO implement cache for calculated value
+// TODO implement cache for calculated value
 int main(int argc, char *argv[])
 {
     // opt_thread is value to optimize
+    // the quantity of memory needed for each node
+    const int node_mem = sizeof(double) * 3 + sizeof(double) + sizeof(int) * 8 + sizeof(int) + sizeof(uint);
     cudaDeviceProp cuda_prop;
     uint n_ents, *d_tents, opt_thread, opt_block, cache_sz;
     dim3 block;
     int *d_tchildren, *d_tparent, *d_sorted_ents;
+    size_t free_mem, total_mem;
     // *_e* memory for entity data
     // *_t* memory for tree data
     // h_le* (host) memory locked for entity data copies
@@ -703,11 +732,8 @@ int main(int argc, char *argv[])
     }
 
     cudaGetDeviceProperties(&cuda_prop, 0);
-    
 
-    int sz =  0;       // TODO get size of number of node
-        opt_thread = 0;// calculate value
-        opt_block = (n_ents - 1) / opt_thread + 1;
+    int nodes_sz = 0; // TODO get size of number of node
 
     // TODO order entities
     // not allocating memory for h_ents_struct
@@ -721,11 +747,6 @@ int main(int argc, char *argv[])
     cudaMalloc(&d_epos, sizeof(double) * n_ents * 3);
     cudaMalloc(&d_evel, sizeof(double) * n_ents * 3);
     cudaMalloc(&d_emass, sizeof(double) * n_ents);
-    cudaMalloc(&d_tcenter, sizeof(double) * sz * 3);
-    cudaMalloc(&d_tmass, sizeof(double) * sz);
-    cudaMalloc(&d_tents, sizeof(uint) * sz);
-    cudaMalloc(&d_tparent, sizeof(uint) * sz);
-    cudaMalloc(&d_tchildren, sizeof(uint) * sz * 8);
     cudaMalloc(&d_sorted_ents, sizeof(int) * n_ents);
     if (n_ents > 1024 * 2)
     {
@@ -741,6 +762,14 @@ int main(int argc, char *argv[])
     {
         cudaMalloc(&d_reduce2, sizeof(double) * ((n_ents * 3 - 1) / 1024 / 1024 + 1));
     }
+
+    cudaMemGetInfo(&free_mem, &total_mem);
+    nodes_sz = free_mem * 3 / 4 / node_mem;
+    cudaMalloc(&d_tcenter, sizeof(double) * nodes_sz * 3);
+    cudaMalloc(&d_tmass, sizeof(double) * nodes_sz);
+    cudaMalloc(&d_tents, sizeof(uint) * nodes_sz);
+    cudaMalloc(&d_tparent, sizeof(uint) * nodes_sz);
+    cudaMalloc(&d_tchildren, sizeof(uint) * nodes_sz * 8);
 
     // initialize struct to be copied in vram
     h_ents_cpy.pos = d_epos;
@@ -764,6 +793,7 @@ int main(int argc, char *argv[])
     free(h_ents_struct.vel);
     free(h_ents_struct.mass);
     // TODO recalculate thread and block size
+    int max_threads = cuda_prop.maxThreadsPerBlock;
     FILE *fpt = fopen(argv[5], "w");
     for (size_t t = start; t < end; t += dt)
     {
@@ -771,13 +801,13 @@ int main(int argc, char *argv[])
         block.x = 32;
         block.y = 6;
         set_tree<<<1, block>>>(d_tree);
-        get_bounding_box<<<(sz - 1) / (1024 * 2) + 1, 1024>>>(d_epos, sz, d_reduce1);
+        get_bounding_box<<<(nodes_sz - 1) / (max_threads * 2) + 1, max_threads>>>(d_epos, n_ents, d_reduce1);
         cudaDeviceSynchronize();
         d_reduce_in = d_reduce2;
         d_reduce_out = d_reduce1;
-        for (int temp_sz = (sz - 1) / (1024 * 2) + 1; temp_sz > 1; temp_sz = (temp_sz - 1) / (1024 * 2) + 1)
+        for (int temp_sz = (n_ents - 1) / (max_threads * 2) + 1; temp_sz > 1; temp_sz = (temp_sz - 1) / (max_threads * 2) + 1)
         {
-            if (temp_sz <= 1024 * 2)
+            if (temp_sz <= max_threads * 2)
             {
                 temp_swap = d_reduce_in;
                 d_reduce_in = d_reduce_out;
@@ -789,22 +819,31 @@ int main(int argc, char *argv[])
                 // the final destination of result is the tree attribute max
                 d_reduce_out = &d_tree->max;
             }
-            //uses 12 registers
-            get_bounding_box<<<(sz - 1) / (1024 * 2) + 1, 1024>>>(d_reduce_in, sz, d_reduce_out);
+            // uses 12 registers
+            get_bounding_box<<<(nodes_sz - 1) / (max_threads * 2) + 1, max_threads, max_threads>>>(d_reduce_in, temp_sz, d_reduce_out);
             cudaDeviceSynchronize();
         }
-        
-        //uses 56 registers
+        get_opt_grid(&cuda_prop, n_ents, 56, &opt_block, &opt_thread);
+        // uses 56 registers
         add_ent<<<opt_block, opt_thread>>>(d_tree, d_ents_struct, n_ents);
         cudaDeviceSynchronize();
-        //uses 62 registers
+
+        get_opt_grid(&cuda_prop, 0, 62, &opt_block, &opt_thread);
+        // uses 62 registers
         set_branch_values<<<opt_block, opt_thread>>>(d_tree);
         cudaDeviceSynchronize();
-        //uses 16 registers
+
+        //maybe the max threads could be n_ents or some fraction like n_ents/2
+        get_opt_grid(&cuda_prop, 0, 16, &opt_block, &opt_thread);
+        // uses 16 registers
         order_ents<<<opt_block, opt_thread>>>(d_tree, d_sorted_ents);
         cudaDeviceSynchronize();
-        //uses 58 registers
-        get_acceleration<<<opt_block, opt_thread>>>(d_tree, d_ents_struct, n_ents, dt);
+
+        get_opt_grid(&cuda_prop, n_ents, 6, &opt_block, &opt_thread);
+        // uses 6 registers
+        block.x = cuda_prop.warpSize;
+        block.y = opt_thread / cuda_prop.warpSize;
+        get_acceleration<<<opt_block, opt_thread, cuda_prop.sharedMemPerBlock / cuda_prop.maxBlocksPerMultiProcessor>>>(d_tree, d_ents_struct, n_ents, dt, cuda_prop.sharedMemPerBlock);
         cudaDeviceSynchronize();
         cudaMemcpy(h_level, d_evel, sizeof(double) * n_ents * 3, cudaMemcpyDeviceToHost);
         cudaMemcpy(h_lepos, d_epos, sizeof(double) * n_ents * 3, cudaMemcpyDeviceToHost);
