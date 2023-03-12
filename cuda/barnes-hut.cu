@@ -39,7 +39,6 @@ typedef struct
 const double BIG_G = 6.67e-11;
 const double THETA = 0.5; // 1;
 // TODO check from version
-const int max_thread_block = 1024;
 
 // a lot of optimization like use shift instead of multiplication will be made by compiler
 
@@ -182,6 +181,8 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz)
         // set init value
         allocated = 0;
 
+        copy_arrs3(pos_ent,&ent->pos[id * 3],0);
+
         // keep last visited node index
         node_indx = tree->root;
 
@@ -190,7 +191,7 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz)
         while (!allocated)
         {
             // center and border_size are updated to the next branch value
-            ent_loc = get_indx_loc(&ent->pos[id * 3], volume_center, &border_size);
+            ent_loc = get_indx_loc(pos_ent, volume_center, &border_size);
             // the position where entity should be placed in children array
             child_indx = node_indx * 8 + ent_loc;
             // current value in the child_indx location
@@ -228,7 +229,7 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz)
                             tree->parent[new_node] = node_indx;
 
                             // get leaves position in the new branch
-                            ent_loc = get_indx_loc(&ent->pos[id * 3], volume_center,
+                            ent_loc = get_indx_loc(pos_ent, volume_center,
                                                    &border_size);
 
                             // the location of the previous children
@@ -280,7 +281,7 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz)
             }
         }
         // set the leaf value
-        copy_arrs3(tree->center, ent->pos, id * 3);
+        copy_arrs3(tree->center, pos_ent, id * 3);
         tree->mass[id] = ent->mass[id];
         tree->ents[id] = 1;
         tree->parent[id] = node_indx;
@@ -348,13 +349,12 @@ __global__ void set_branch_values(Octtree *tree)
     // used as cache
     int children_cache[8];
     double center[3];
-    int child_indx, last_node, sz_nodes, ents;
+    int child_indx, last_node, ents;
     int id = blockDim.x * blockIdx.x + threadIdx.x;
     int cache_sz;
     // new_mass is needed because we need old and new mass value at the same time
     double mass, new_mass;
     last_node = tree->firstfree - 1;
-    sz_nodes = last_node - tree->root;
     // TODO check if it's better to give the first not allocated node to the first free thread
     for (int indx = last_node - id; indx >= tree->root; indx -= sz_threads)
     {
@@ -517,17 +517,16 @@ __device__ double get_distance(double *r1, double *r2)
 __global__ void get_acceleration(Octtree *tree, Entities *ents, int ents_sz, size_t dt)
 {
     uint threads_sz = gridDim.x * blockDim.x;
-    uint tid, id, stack_pointer;
+    uint tid;
     // 1024*48 is the total shared memory, remove space taken from double and from cache_node, divide for 32 (number of warps)
     int id_in_warp, curr_node, depth, *my_stack, warp_id, stack_level;
-    double pos_ent[3], vel_ent[3], mass_ent, border, acc_ent[3], ddt;
+    double pos_ent[3], mass_ent, border, acc_ent[3], ddt;
     __shared__ double pos_node[3 * 32], mass_node[32];
 
-    const int cache_sz = 1024 * 48 - (4 * 32 * (8 / 4)) - 32;
+    const int cache_sz = 1024 * 46/4;
     __shared__ int cache_node[32], stack[cache_sz];
     tid = threadIdx.x;
     id_in_warp = tid % 32;
-    id = blockIdx.x * blockDim.x + tid;
     border = tree->max * 2;
     warp_id = tid / 32;
     my_stack = &stack[cache_sz / 32 * warp_id];
@@ -540,9 +539,6 @@ __global__ void get_acceleration(Octtree *tree, Entities *ents, int ents_sz, siz
         pos_ent[0] = ents->pos[i * 3];
         pos_ent[1] = ents->pos[i * 3 + 1];
         pos_ent[2] = ents->pos[i * 3 + 2];
-        vel_ent[0] = ents->vel[i * 3];
-        vel_ent[1] = ents->vel[i * 3 + 1];
-        vel_ent[2] = ents->vel[i * 3 + 2];
         mass_ent = ents->mass[i];
         acc_ent[0] = 0;
         acc_ent[1] = 0;
@@ -553,7 +549,6 @@ __global__ void get_acceleration(Octtree *tree, Entities *ents, int ents_sz, siz
         }
 
         depth = 0;
-        stack_pointer = 0;
         curr_node = tree->root;
 
         // start iterate algorithm, when depth<0 the algorithm has ended
@@ -676,11 +671,13 @@ void print_values(double *pos, double *vel, int ents_sz, FILE *fpt)
 }
 
 // TODO check errors from malloc and kernels and fopen
+//TODO implement cache for calculated value
 int main(int argc, char *argv[])
 {
     // opt_thread is value to optimize
+    cudaDeviceProp cuda_prop;
     uint n_ents, *d_tents, opt_thread, opt_block, cache_sz;
-    dim3 block, grid;
+    dim3 block;
     int *d_tchildren, *d_tparent, *d_sorted_ents;
     // *_e* memory for entity data
     // *_t* memory for tree data
@@ -705,8 +702,11 @@ int main(int argc, char *argv[])
         cache_sz = strtoul(argv[6], NULL, 10);
     }
 
-    int sz =         // TODO get size of number of node
-        opt_thread = // calculate value
+    cudaGetDeviceProperties(&cuda_prop, 0);
+    
+
+    int sz =  0;       // TODO get size of number of node
+        opt_thread = 0;// calculate value
         opt_block = (n_ents - 1) / opt_thread + 1;
 
     // TODO order entities
@@ -771,7 +771,6 @@ int main(int argc, char *argv[])
         block.x = 32;
         block.y = 6;
         set_tree<<<1, block>>>(d_tree);
-        uint ents = n_ents;
         get_bounding_box<<<(sz - 1) / (1024 * 2) + 1, 1024>>>(d_epos, sz, d_reduce1);
         cudaDeviceSynchronize();
         d_reduce_in = d_reduce2;
@@ -790,17 +789,21 @@ int main(int argc, char *argv[])
                 // the final destination of result is the tree attribute max
                 d_reduce_out = &d_tree->max;
             }
-
+            //uses 12 registers
             get_bounding_box<<<(sz - 1) / (1024 * 2) + 1, 1024>>>(d_reduce_in, sz, d_reduce_out);
             cudaDeviceSynchronize();
         }
-
+        
+        //uses 56 registers
         add_ent<<<opt_block, opt_thread>>>(d_tree, d_ents_struct, n_ents);
         cudaDeviceSynchronize();
+        //uses 62 registers
         set_branch_values<<<opt_block, opt_thread>>>(d_tree);
         cudaDeviceSynchronize();
+        //uses 16 registers
         order_ents<<<opt_block, opt_thread>>>(d_tree, d_sorted_ents);
         cudaDeviceSynchronize();
+        //uses 58 registers
         get_acceleration<<<opt_block, opt_thread>>>(d_tree, d_ents_struct, n_ents, dt);
         cudaDeviceSynchronize();
         cudaMemcpy(h_level, d_evel, sizeof(double) * n_ents * 3, cudaMemcpyDeviceToHost);
