@@ -14,7 +14,7 @@ typedef struct {
     double z;
 } RVec3;
 
-const double BIG_G = 6.67e-11;
+__constant__ double BIG_G = 6.67e-11;
 
 __host__ void get_entities(char filename[], uint *n_ents, double **positions, double **velocities);
 __host__ void count_entities_file(char *filename, uint *n);
