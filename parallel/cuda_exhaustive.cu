@@ -225,7 +225,7 @@ void propagation(double *masses, double *positions, double *velocities, uint ent
     double3 *g_positions = (double3 *) positions;
     double3 *g_velocities = (double3 *) velocities;
 
-    double3 a_g = {0.0f, 0.0f, 0.0f};
+    double3 a_g = {0.0, 0.0, 0.0};
     double3 r_vector; // Spostato da sotto - lo alloco una sola volta
     for (size_t m2_idx = 0; m2_idx < ents_sz; m2_idx++) {
         if (m2_idx != myID) {
