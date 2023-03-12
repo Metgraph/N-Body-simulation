@@ -221,14 +221,23 @@ void propagation(double *masses, double *positions, double *velocities, uint ent
     }
     printf("DEBUG: delta: %f, #ents: %u\n", dt, ents_sz);
     int myID = blockIdx.x * blockDim.x + threadIdx.x;
-    RVec3 a_g = {0, 0, 0};
-    RVec3 r_vector; // Spostato da sotto - lo alloco una sola volta
+
+    double3 *g_positions = (double3 *) positions;
+    double3 *g_velocities = (double3 *) velocities;
+
+    double3 a_g = {0.0f, 0.0f, 0.0f};
+    double3 r_vector; // Spostato da sotto - lo alloco una sola volta
     for (size_t m2_idx = 0; m2_idx < ents_sz; m2_idx++) {
         if (m2_idx != myID) {
 
-            r_vector.x = positions[myID*3  ] - positions[m2_idx*3  ];
-            r_vector.y = positions[myID*3+1] - positions[m2_idx*3+1];
-            r_vector.z = positions[myID*3+2] - positions[m2_idx*3+2];
+//            r_vector.x = positions[myID*3  ] - positions[m2_idx*3  ];
+//            r_vector.y = positions[myID*3+1] - positions[m2_idx*3+1];
+//            r_vector.z = positions[myID*3+2] - positions[m2_idx*3+2];
+
+            r_vector.x = g_positions[myID*3].x - g_positions[m2_idx*3].x;
+            r_vector.y = g_positions[myID*3].y - g_positions[m2_idx*3].y;
+            r_vector.z = g_positions[myID*3].z - g_positions[m2_idx*3].z;
+
             printf("DEBUG: Rvector: x: %f, y: %f, z: %f\n", r_vector.x, r_vector.y, r_vector.x);
 
             // distanza tra i due corpi
@@ -250,9 +259,9 @@ void propagation(double *masses, double *positions, double *velocities, uint ent
             printf("DEBUG: a_g fine ciclo interno: x: %f, y: %f, z: %f\n", a_g.x, a_g.y, a_g.z);
         }
     }
-    velocities[myID*3    ] += a_g.x * dt;
-    velocities[myID*3 + 1] += a_g.y * dt;
-    velocities[myID*3 + 2] += a_g.z * dt;
+    g_velocities[myID*3].x += a_g.x * dt;
+    g_velocities[myID*3].y += a_g.y * dt;
+    g_velocities[myID*3].z += a_g.z * dt;
     printf("DEBUG: Update velocities, end kernel: %f, %f, %f\n", velocities[myID*3], velocities[myID*3 + 1], velocities[myID*3 + 2]);
 }
 
