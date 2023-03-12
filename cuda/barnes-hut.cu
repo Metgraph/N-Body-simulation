@@ -416,6 +416,56 @@ __global__ void set_branch_values(Octtree *tree)
     }
 }
 
+//here tree->parent will be used to store the "s", the position where to write values (tree->parent is not needed anymore)
+__global__ void order_ents(Octtree *tree, int *sorted){
+    uint id = threadIdx.x + blockIdx.x*blockDim.x;
+	uint stride = blockDim.x*gridDim.x;
+	uint offset = 0;
+    const int root= tree->root;
+
+    //s is the position in the array where to write the body
+	int s = 0;
+	if(threadIdx.x == 0){
+		for(int i=0;i<8;i++){
+			int node = tree->children[i*root*8];
+
+			if(node >= root){  // not a leaf node
+				tree->parent[node] = s;
+				s += tree->ents[node];
+			}
+			else if(node >= 0){  // leaf node
+				sorted[s] = node;
+				s++;
+			}
+		}
+        __threadfence();
+	}
+
+	int cell = root + id;
+	int tree_sz = tree->firstfree;
+	while((cell + offset) < tree_sz){
+		s = tree->parent[cell + offset];
+	
+		if(s >= 0){
+
+			for(int i=0;i<8;i++){
+				int node = tree->children[8*(cell+offset) + i];
+
+				if(node >= root){  // not a leaf node
+					tree->parent[node] = s;
+					s += tree->ents[node];
+				}
+				else if(node >= 0){  // leaf node
+					sorted[s] = node;
+					s++;
+				}
+			}
+			offset += stride;
+            __threadfence();
+		}
+	}
+}
+
 
 __device__ void calculate_acceleration(double *pos_node, double mass_node, double *pos_ent, double mass_ent,
                                        double acc[])
@@ -605,7 +655,7 @@ int main(int argc, char *argv[])
     // opt_thread is value to optimize
     uint n_ents, *d_tents, opt_thread, opt_block, cache_sz;
     dim3 block, grid;
-    int *d_tchildren, *d_tparent;
+    int *d_tchildren, *d_tparent, *d_sorted_ents;
     // *_e* memory for entity data
     // *_t* memory for tree data
     // h_le* (host) memory locked for entity data copies
@@ -650,6 +700,7 @@ int main(int argc, char *argv[])
     cudaMalloc(&d_tents, sizeof(uint) * sz);
     cudaMalloc(&d_tparent, sizeof(uint) * sz);
     cudaMalloc(&d_tchildren, sizeof(uint) * sz * 8);
+    cudaMalloc(&d_sorted_ents, sizeof(int)*n_ents);
     if(n_ents>1024*2){
         cudaMalloc(&d_reduce1, sizeof(double)*((n_ents*3-1)/1024+1));
     }else{
@@ -715,6 +766,8 @@ int main(int argc, char *argv[])
         cudaDeviceSynchronize();
         set_branch_values<<<opt_block, opt_thread>>>(d_tree);
         cudaDeviceSynchronize();
+        order_ents<<<opt_block, opt_thread>>>(d_tree, d_sorted_ents);
+        cudaDeviceSynchronize();
         get_acceleration<<<opt_block, opt_thread>>>(d_tree, d_ents_struct, n_ents, dt);
         cudaDeviceSynchronize();
         cudaMemcpy(h_level, d_evel, sizeof(double) * n_ents * 3, cudaMemcpyDeviceToHost);
@@ -733,6 +786,7 @@ int main(int argc, char *argv[])
     cudaFree(d_tents);
     cudaFree(d_tparent);
     cudaFree(d_tchildren);
+    cudaFree(d_sorted_ents);
     if(n_ents>1024*2){
         cudaFree(d_reduce1);
     }
