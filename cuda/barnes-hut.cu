@@ -85,8 +85,8 @@ uint get_entities(char filename[], Entities *ents)
             ret_size *= 2;
             // ret = (Entity *)realloc((void *)ret, ret_size * sizeof(Entity));
             pos_ret = (double *)realloc(pos_ret, ret_size * 3 * sizeof(double));
-            vel_ret = (double *)realloc(pos_ret, ret_size * 3 * sizeof(double));
-            mass_ret = (double *)realloc(pos_ret, ret_size * sizeof(double));
+            vel_ret = (double *)realloc(vel_ret, ret_size * 3 * sizeof(double));
+            mass_ret = (double *)realloc(mass_ret, ret_size * sizeof(double));
         }
         // Save value in first free location
         // ret[size - 1] = e_buff;
@@ -696,6 +696,13 @@ void get_opt_grid(cudaDeviceProp *prop, uint tot_threads, uint regs_sz, uint *bl
     *threads_sz=temp_thread;
 }
 
+void check_error(cudaError_t err){
+    if(err!=cudaSuccess){
+        printf("ERROR: %s\n", cudaGetErrorString(err));
+        exit(-1);
+    }
+}
+
 // TODO check errors from malloc and kernels and fopen
 // TODO implement cache for calculated value
 int main(int argc, char *argv[])
@@ -704,6 +711,7 @@ int main(int argc, char *argv[])
     // the quantity of memory needed for each node
     const int node_mem = sizeof(double) * 3 + sizeof(double) + sizeof(int) * 8 + sizeof(int) + sizeof(uint);
     cudaDeviceProp cuda_prop;
+    cudaError_t cuda_err;
     uint n_ents, *d_tents, opt_thread, opt_block, cache_sz;
     dim3 block;
     int *d_tchildren, *d_tparent, *d_sorted_ents;
@@ -735,8 +743,6 @@ int main(int argc, char *argv[])
 
     int nodes_sz = 0; // TODO get size of number of node
 
-    // TODO order entities
-    // not allocating memory for h_ents_struct
     cudaMallocHost(&h_lepos, sizeof(double) * n_ents * 3);
     cudaMallocHost(&h_level, sizeof(double) * n_ents * 3);
     cudaMemcpy(h_lepos, h_ents_struct.pos, sizeof(double) * n_ents * 3, cudaMemcpyHostToHost);
@@ -802,7 +808,8 @@ int main(int argc, char *argv[])
         block.y = 6;
         set_tree<<<1, block>>>(d_tree);
         get_bounding_box<<<(nodes_sz - 1) / (max_threads * 2) + 1, max_threads>>>(d_epos, n_ents, d_reduce1);
-        cudaDeviceSynchronize();
+        cuda_err=cudaDeviceSynchronize();
+        check_error(cuda_err);
         d_reduce_in = d_reduce2;
         d_reduce_out = d_reduce1;
         for (int temp_sz = (n_ents - 1) / (max_threads * 2) + 1; temp_sz > 1; temp_sz = (temp_sz - 1) / (max_threads * 2) + 1)
@@ -821,30 +828,35 @@ int main(int argc, char *argv[])
             }
             // uses 12 registers
             get_bounding_box<<<(nodes_sz - 1) / (max_threads * 2) + 1, max_threads, max_threads>>>(d_reduce_in, temp_sz, d_reduce_out);
-            cudaDeviceSynchronize();
+            cuda_err=cudaDeviceSynchronize();
+        check_error(cuda_err);
         }
         get_opt_grid(&cuda_prop, n_ents, 56, &opt_block, &opt_thread);
         // uses 56 registers
         add_ent<<<opt_block, opt_thread>>>(d_tree, d_ents_struct, n_ents);
-        cudaDeviceSynchronize();
+        cuda_err=cudaDeviceSynchronize();
+        check_error(cuda_err);
 
         get_opt_grid(&cuda_prop, 0, 62, &opt_block, &opt_thread);
         // uses 62 registers
         set_branch_values<<<opt_block, opt_thread>>>(d_tree);
-        cudaDeviceSynchronize();
+        cuda_err=cudaDeviceSynchronize();
+        check_error(cuda_err);
 
         //maybe the max threads could be n_ents or some fraction like n_ents/2
         get_opt_grid(&cuda_prop, 0, 16, &opt_block, &opt_thread);
         // uses 16 registers
         order_ents<<<opt_block, opt_thread>>>(d_tree, d_sorted_ents);
-        cudaDeviceSynchronize();
+        cuda_err=cudaDeviceSynchronize();
+        check_error(cuda_err);
 
         get_opt_grid(&cuda_prop, n_ents, 6, &opt_block, &opt_thread);
         // uses 6 registers
         block.x = cuda_prop.warpSize;
         block.y = opt_thread / cuda_prop.warpSize;
         get_acceleration<<<opt_block, opt_thread, cuda_prop.sharedMemPerBlock / cuda_prop.maxBlocksPerMultiProcessor>>>(d_tree, d_ents_struct, n_ents, dt, cuda_prop.sharedMemPerBlock);
-        cudaDeviceSynchronize();
+        cuda_err=cudaDeviceSynchronize();
+        check_error(cuda_err);
         cudaMemcpy(h_level, d_evel, sizeof(double) * n_ents * 3, cudaMemcpyDeviceToHost);
         cudaMemcpy(h_lepos, d_epos, sizeof(double) * n_ents * 3, cudaMemcpyDeviceToHost);
         print_values(h_lepos, h_level, n_ents, fpt);
