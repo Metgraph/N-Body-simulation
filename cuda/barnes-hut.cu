@@ -168,7 +168,7 @@ __device__ int get_indx_loc(double *pos, double *center, double *border_size)
 __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz)
 {
     int id = threadIdx.x + blockIdx.x * blockDim.x;
-    if (ents_sz < id)
+    if (id < ents_sz)
     {
 
         double pos_ent[3];
@@ -195,93 +195,97 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz)
             // the position where entity should be placed in children array
             child_indx = node_indx * 8 + ent_loc;
             // current value in the child_indx location
-            child_val = tree->children[child_indx];
-            if (child_val != LOCKED)
+            
+            //temporany solution
+            do
             {
-                // only one thread can enter
-                if (child_val ==
-                    atomicCAS(&tree->children[child_indx], child_val, LOCKED))
+                child_val = tree->children[child_indx];
+                if (child_val != LOCKED)
                 {
-                    // if nothing is located, allocate the leaf
-                    if (child_val == -1)
+                    // only one thread can enter
+                    if (child_val ==
+                        atomicCAS(&tree->children[child_indx], child_val, LOCKED))
                     {
-                        tree->children[child_indx] = id;
-                        __threadfence();
-                        // if there is a leaf, start to divide until the leaves will
-                        // be allocated in 2 different place in children array
-                    }
-                    else if (child_val < tree->root)
-                    {
-                        allocated = 0;
-                        // the leaf that was already there
-                        other = child_val;
-                        int other_loc;
-                        double other_center[3];
-                        copy_arrs3(other_center, volume_center, 0);
-                        double other_border = border_size;
-                        while (!allocated)
+                        // if nothing is located, allocate the leaf
+                        if (child_val == -1)
                         {
-                            // new node location
-                            // atomic add return old value
-                            int new_node = atomicAdd(&tree->firstfree, 1);
-
-                            init_node(tree, new_node);
-                            tree->parent[new_node] = node_indx;
-
-                            // get leaves position in the new branch
-                            ent_loc = get_indx_loc(pos_ent, volume_center,
-                                                   &border_size);
-
-                            // the location of the previous children
-                            other_loc = get_indx_loc(&tree->center[other * 3],
-                                                     other_center, &other_border);
-
-                            allocated = other_loc != ent_loc;
-                            // not execute in the last loop
-                            if (!allocated)
+                            tree->children[child_indx] = id;
+                            allocated = 1;
+                            __threadfence();
+                            // if there is a leaf, start to divide until the leaves will
+                            // be allocated in 2 different place in children array
+                        }
+                        else if (child_val < tree->root)
+                        {
+                            allocated = 0;
+                            // the leaf that was already there
+                            other = child_val;
+                            int other_loc;
+                            double other_center[3];
+                            copy_arrs3(other_center, volume_center, 0);
+                            double other_border = border_size;
+                            // node_indx is used to store last node created
+                            while (!allocated)
                             {
-                                // lock location where
-                                tree->children[node_indx * 8 + ent_loc] = LOCKED;
+                                // new node location
+                                // atomic add return old value
+                                int new_node = atomicAdd(&tree->firstfree, 1);
+
+                                init_node(tree, new_node);
+                                tree->parent[new_node] = node_indx;
+
+                                // get leaves position in the new branch
+                                ent_loc = get_indx_loc(pos_ent, volume_center,
+                                                       &border_size);
+
+                                // the location of the previous children
+                                other_loc = get_indx_loc(&tree->center[other * 3],
+                                                         other_center, &other_border);
+
+                                allocated = other_loc != ent_loc;
+
+                                tree->children[new_node * 8 + ent_loc] = LOCKED;
+                                // not execute in the last loop
+                                if (allocated)
+                                {
+                                    // lock location that will be explored
+                                    tree->children[new_node * 8 + other_loc] = LOCKED;
+                                }
                                 // child_indx is not updated, so we can use it to
                                 // get the location of new_node in children array
                                 tree->children[child_indx] = new_node;
                                 __threadfence();
+                                // slot in children where will be created new node or will be put the body
+                                child_indx = new_node * 8 + ent_loc;
+
+                                node_indx = new_node;
                             }
-                            // slot in children where thread is working
-                            child_indx = node_indx * 8 + ent_loc;
 
-                            node_indx = new_node;
-
-                            // use the new branch as the current one
-                            // indx = get_indx_loc(&tree->center[]);
-                            // set the new branch as child
-                            // unlock children
-                            // update first free location
+                            tree->children[child_indx] = id;
+                            tree->children[node_indx * 8 + other_loc] = other;
+                            tree->parent[id] = node_indx;
+                            tree->parent[other] = node_indx;
+                            __threadfence();
+                            // if there is a branch
                         }
-
-                        tree->children[child_indx] = id;
-                        tree->children[node_indx * 8 + other_loc] = other;
-                        tree->parent[id] = node_indx;
-                        tree->parent[other] = node_indx;
-                        __threadfence();
-                        // if there is a branch
-                    }
-                    else if (child_val >= tree->root)
-                    {
-                        node_indx = child_val;
-                        // unlock child setting the value before lock
-                        tree->children[child_indx] = child_val;
-                        __threadfence();
-                    }
-                    else
-                    {
-                        // ERRORs
+                        else if (child_val >= tree->root)
+                        {
+                            node_indx = child_val;
+                            // unlock child setting the value before lock
+                            tree->children[child_indx] = child_val;
+                            __threadfence();
+                        }
+                        else
+                        {
+                            // ERRORs
+                        }
                     }
                 }
-            }
+            } while (child_val == LOCKED);
         }
         // set the leaf value
-        copy_arrs3(tree->center, pos_ent, id * 3);
+        // set children should be not needed, but i'm not sure
+        copy_arrs3(&tree->center[id * 3], pos_ent, 0);
         tree->mass[id] = ent->mass[id];
         tree->ents[id] = 1;
         tree->parent[id] = node_indx;
@@ -296,33 +300,26 @@ __global__ void get_bounding_box(double *g_idata, int ents_sz, double *g_odata)
     // reading from global memory, writing to shared memory
     uint tid = threadIdx.x;
     uint space = (blockDim.x);
-    uint id = blockIdx.x * blockDim.x + threadIdx.x;
     uint i = (blockIdx.x * (blockDim.x * 2) + threadIdx.x);
-
+    double v1, v2;
     // if thread are more than values give them a 0 value
     // the first if has no divergence, becuase threads have same ents_sz value
-    if (ents_sz % 2 == 0)
+    if (i < ents_sz)
     {
-        if (id < ents_sz / 2)
+        v1 = fabs(g_idata[i]);
+        if (i + space < ents_sz)
         {
-            sdata[tid] = fabs(g_idata[i]) > fabs(g_idata[i + space]) ? fabs(g_idata[i]) : fabs(g_idata[i + space]);
+            v2 = fabs(g_idata[i + space]);
+            sdata[tid] = v1 > v2 ? v1 : v2;
         }
         else
         {
-            sdata[tid] = 0;
+            sdata[tid] = v1;
         }
     }
     else
     {
-        if (id < ents_sz - 1 / 2 + 1)
-        {
-            // the condition after the or is if it is the last element, and since ents_sz is odd, the last thread has only a value instead of 2
-            sdata[tid] = fabs(g_idata[i]) > fabs(g_idata[i + space]) || id == ents_sz / 2 ? fabs(g_idata[i]) : fabs(g_idata[i + space]);
-        }
-        else
-        {
-            sdata[tid] = 0;
-        }
+        sdata[tid] = 0;
     }
     __syncthreads();
     // do reduction in shared mem
@@ -682,22 +679,25 @@ void get_opt_grid(cudaDeviceProp *prop, uint tot_threads, uint regs_sz, uint *bl
     temp_thread = prop->maxThreadsPerMultiProcessor / prop->maxBlocksPerMultiProcessor; // calculate value
     if (temp_thread * regs_sz > prop->regsPerMultiprocessor / prop->maxBlocksPerMultiProcessor)
     {
-        temp_thread=prop->regsPerMultiprocessor / prop->maxBlocksPerMultiProcessor/regs_sz;
-
+        temp_thread = prop->regsPerMultiprocessor / prop->maxBlocksPerMultiProcessor / regs_sz;
     }
-    if(tot_threads==0){
-        temp_block= prop->maxBlocksPerMultiProcessor*prop->multiProcessorCount;
-    }else{
+    if (tot_threads == 0)
+    {
+        temp_block = prop->maxBlocksPerMultiProcessor * prop->multiProcessorCount;
+    }
+    else
+    {
         temp_block = (tot_threads - 1) / temp_thread + 1;
-
     }
 
-    *blocks_sz=temp_block;
-    *threads_sz=temp_thread;
+    *blocks_sz = temp_block;
+    *threads_sz = temp_thread;
 }
 
-void check_error(cudaError_t err){
-    if(err!=cudaSuccess){
+void check_error(cudaError_t err)
+{
+    if (err != cudaSuccess)
+    {
         printf("ERROR: %s\n", cudaGetErrorString(err));
         exit(-1);
     }
@@ -724,39 +724,54 @@ int main(int argc, char *argv[])
     Octtree h_tree_cpy, *d_tree;
     size_t start, end, dt;
     cache_sz = 0;
-    if (argc < 6 || argc > 7)
-    {
-        fprintf(stderr, "Usage: %s input_filename start_time end_time delta_time output_filename [cache_sz_MB]\n", argv[0]);
-        return 1;
-    }
+    // if (argc < 6 || argc > 7)
+    // {
+    //     fprintf(stderr, "Usage: %s input_filename start_time end_time delta_time output_filename [cache_sz_MB]\n", argv[0]);
+    //     return 1;
+    // }
 
-    n_ents = get_entities(argv[1], &h_ents_struct);
-    start = strtoul(argv[2], NULL, 10);
-    end = strtoul(argv[3], NULL, 10);
-    dt = strtoul(argv[4], NULL, 10);
-    if (argc == 7)
-    {
-        cache_sz = strtoul(argv[6], NULL, 10);
-    }
+    // n_ents = get_entities(argv[1], &h_ents_struct);
+    // start = strtoul(argv[2], NULL, 10);
+    // end = strtoul(argv[3], NULL, 10);
+    // dt = strtoul(argv[4], NULL, 10);
+    // if (argc == 7)
+    // {
+    //     cache_sz = strtoul(argv[6], NULL, 10);
+    // }
+    n_ents = get_entities("/home/prop/Documents/multicore/N-Body-simulation/tests/100_bodies.csv", &h_ents_struct);
+    start = 0;
+    end = 10;
+    dt = 1;
 
     cudaGetDeviceProperties(&cuda_prop, 0);
 
     int nodes_sz = 0; // TODO get size of number of node
 
-    cudaMallocHost(&h_lepos, sizeof(double) * n_ents * 3);
-    cudaMallocHost(&h_level, sizeof(double) * n_ents * 3);
-    cudaMemcpy(h_lepos, h_ents_struct.pos, sizeof(double) * n_ents * 3, cudaMemcpyHostToHost);
-    cudaMemcpy(h_level, h_ents_struct.vel, sizeof(double) * n_ents * 3, cudaMemcpyHostToHost);
+    cuda_err = cudaMallocHost(&h_lepos, sizeof(double) * n_ents * 3);
+    check_error(cuda_err);
+    cuda_err = cudaMallocHost(&h_level, sizeof(double) * n_ents * 3);
+    check_error(cuda_err);
+    cuda_err = cudaMemcpy(h_lepos, h_ents_struct.pos, sizeof(double) * n_ents * 3, cudaMemcpyHostToHost);
+    check_error(cuda_err);
+    cuda_err = cudaMemcpy(h_level, h_ents_struct.vel, sizeof(double) * n_ents * 3, cudaMemcpyHostToHost);
+    check_error(cuda_err);
 
-    cudaMalloc(&d_ents_struct, sizeof(Entities));
-    cudaMalloc(&d_tree, sizeof(Octtree));
-    cudaMalloc(&d_epos, sizeof(double) * n_ents * 3);
-    cudaMalloc(&d_evel, sizeof(double) * n_ents * 3);
-    cudaMalloc(&d_emass, sizeof(double) * n_ents);
-    cudaMalloc(&d_sorted_ents, sizeof(int) * n_ents);
+    cuda_err = cudaMalloc(&d_ents_struct, sizeof(Entities));
+    check_error(cuda_err);
+    cuda_err = cudaMalloc(&d_tree, sizeof(Octtree));
+    check_error(cuda_err);
+    cuda_err = cudaMalloc(&d_epos, sizeof(double) * n_ents * 3);
+    check_error(cuda_err);
+    cuda_err = cudaMalloc(&d_evel, sizeof(double) * n_ents * 3);
+    check_error(cuda_err);
+    cuda_err = cudaMalloc(&d_emass, sizeof(double) * n_ents);
+    check_error(cuda_err);
+    cuda_err = cudaMalloc(&d_sorted_ents, sizeof(int) * n_ents);
+    check_error(cuda_err);
     if (n_ents > 1024 * 2)
     {
-        cudaMalloc(&d_reduce1, sizeof(double) * ((n_ents * 3 - 1) / 1024 + 1));
+        cuda_err = cudaMalloc(&d_reduce1, sizeof(double) * ((n_ents * 3 - 1) / 1024 + 1));
+        check_error(cuda_err);
     }
     else
     {
@@ -766,16 +781,23 @@ int main(int argc, char *argv[])
     }
     if (n_ents > 1024 * 2 * 1024 * 2)
     {
-        cudaMalloc(&d_reduce2, sizeof(double) * ((n_ents * 3 - 1) / 1024 / 1024 + 1));
+        cuda_err = cudaMalloc(&d_reduce2, sizeof(double) * ((n_ents * 3 - 1) / 1024 / 1024 + 1));
+        check_error(cuda_err);
     }
 
-    cudaMemGetInfo(&free_mem, &total_mem);
+    cuda_err = cudaMemGetInfo(&free_mem, &total_mem);
+    check_error(cuda_err);
     nodes_sz = free_mem * 3 / 4 / node_mem;
-    cudaMalloc(&d_tcenter, sizeof(double) * nodes_sz * 3);
-    cudaMalloc(&d_tmass, sizeof(double) * nodes_sz);
-    cudaMalloc(&d_tents, sizeof(uint) * nodes_sz);
-    cudaMalloc(&d_tparent, sizeof(uint) * nodes_sz);
-    cudaMalloc(&d_tchildren, sizeof(uint) * nodes_sz * 8);
+    cuda_err = cudaMalloc(&d_tcenter, sizeof(double) * nodes_sz * 3);
+    check_error(cuda_err);
+    cuda_err = cudaMalloc(&d_tmass, sizeof(double) * nodes_sz);
+    check_error(cuda_err);
+    cuda_err = cudaMalloc(&d_tents, sizeof(uint) * nodes_sz);
+    check_error(cuda_err);
+    cuda_err = cudaMalloc(&d_tparent, sizeof(uint) * nodes_sz);
+    check_error(cuda_err);
+    cuda_err = cudaMalloc(&d_tchildren, sizeof(uint) * nodes_sz * 8);
+    check_error(cuda_err);
 
     // initialize struct to be copied in vram
     h_ents_cpy.pos = d_epos;
@@ -789,17 +811,23 @@ int main(int argc, char *argv[])
     h_tree_cpy.children = d_tchildren;
     h_tree_cpy.root = n_ents;
 
-    cudaMemcpy(d_tree, &h_tree_cpy, sizeof(Octtree), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_ents_struct, &h_ents_cpy, sizeof(Entities), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_epos, h_lepos, sizeof(double) * n_ents * 3, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_evel, h_level, sizeof(double) * n_ents * 3, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_emass, h_ents_struct.mass, sizeof(double) * n_ents, cudaMemcpyHostToDevice);
+    cuda_err = cudaMemcpy(d_tree, &h_tree_cpy, sizeof(Octtree), cudaMemcpyHostToDevice);
+    check_error(cuda_err);
+    cuda_err = cudaMemcpy(d_ents_struct, &h_ents_cpy, sizeof(Entities), cudaMemcpyHostToDevice);
+    check_error(cuda_err);
+    cuda_err = cudaMemcpy(d_epos, h_lepos, sizeof(double) * n_ents * 3, cudaMemcpyHostToDevice);
+    check_error(cuda_err);
+    cuda_err = cudaMemcpy(d_evel, h_level, sizeof(double) * n_ents * 3, cudaMemcpyHostToDevice);
+    check_error(cuda_err);
+    cuda_err = cudaMemcpy(d_emass, h_ents_struct.mass, sizeof(double) * n_ents, cudaMemcpyHostToDevice);
+    check_error(cuda_err);
 
     free(h_ents_struct.pos);
     free(h_ents_struct.vel);
     free(h_ents_struct.mass);
     // TODO recalculate thread and block size
     int max_threads = cuda_prop.maxThreadsPerBlock;
+    printf("Initialization completed\n");
     FILE *fpt = fopen(argv[5], "w");
     for (size_t t = start; t < end; t += dt)
     {
@@ -807,11 +835,14 @@ int main(int argc, char *argv[])
         block.x = 32;
         block.y = 6;
         set_tree<<<1, block>>>(d_tree);
-        get_bounding_box<<<(nodes_sz - 1) / (max_threads * 2) + 1, max_threads>>>(d_epos, n_ents, d_reduce1);
-        cuda_err=cudaDeviceSynchronize();
+        cuda_err = cudaDeviceSynchronize();
+        check_error(cuda_err);
+        get_bounding_box<<<(n_ents - 1) / (max_threads * 2) + 1, max_threads, max_threads * sizeof(double)>>>(d_epos, n_ents, d_reduce1);
+        cuda_err = cudaDeviceSynchronize();
         check_error(cuda_err);
         d_reduce_in = d_reduce2;
         d_reduce_out = d_reduce1;
+        // TODO check if num of blocks are correct
         for (int temp_sz = (n_ents - 1) / (max_threads * 2) + 1; temp_sz > 1; temp_sz = (temp_sz - 1) / (max_threads * 2) + 1)
         {
             if (temp_sz <= max_threads * 2)
@@ -827,27 +858,27 @@ int main(int argc, char *argv[])
                 d_reduce_out = &d_tree->max;
             }
             // uses 12 registers
-            get_bounding_box<<<(nodes_sz - 1) / (max_threads * 2) + 1, max_threads, max_threads>>>(d_reduce_in, temp_sz, d_reduce_out);
-            cuda_err=cudaDeviceSynchronize();
-        check_error(cuda_err);
+            get_bounding_box<<<(temp_sz - 1) / (max_threads * 2) + 1, max_threads, max_threads * sizeof(double)>>>(d_reduce_in, temp_sz, d_reduce_out);
+            cuda_err = cudaDeviceSynchronize();
+            check_error(cuda_err);
         }
         get_opt_grid(&cuda_prop, n_ents, 56, &opt_block, &opt_thread);
         // uses 56 registers
         add_ent<<<opt_block, opt_thread>>>(d_tree, d_ents_struct, n_ents);
-        cuda_err=cudaDeviceSynchronize();
+        cuda_err = cudaDeviceSynchronize();
         check_error(cuda_err);
 
         get_opt_grid(&cuda_prop, 0, 62, &opt_block, &opt_thread);
         // uses 62 registers
         set_branch_values<<<opt_block, opt_thread>>>(d_tree);
-        cuda_err=cudaDeviceSynchronize();
+        cuda_err = cudaDeviceSynchronize();
         check_error(cuda_err);
 
-        //maybe the max threads could be n_ents or some fraction like n_ents/2
+        // maybe the max threads could be n_ents or some fraction like n_ents/2
         get_opt_grid(&cuda_prop, 0, 16, &opt_block, &opt_thread);
         // uses 16 registers
         order_ents<<<opt_block, opt_thread>>>(d_tree, d_sorted_ents);
-        cuda_err=cudaDeviceSynchronize();
+        cuda_err = cudaDeviceSynchronize();
         check_error(cuda_err);
 
         get_opt_grid(&cuda_prop, n_ents, 6, &opt_block, &opt_thread);
@@ -855,7 +886,7 @@ int main(int argc, char *argv[])
         block.x = cuda_prop.warpSize;
         block.y = opt_thread / cuda_prop.warpSize;
         get_acceleration<<<opt_block, opt_thread, cuda_prop.sharedMemPerBlock / cuda_prop.maxBlocksPerMultiProcessor>>>(d_tree, d_ents_struct, n_ents, dt, cuda_prop.sharedMemPerBlock);
-        cuda_err=cudaDeviceSynchronize();
+        cuda_err = cudaDeviceSynchronize();
         check_error(cuda_err);
         cudaMemcpy(h_level, d_evel, sizeof(double) * n_ents * 3, cudaMemcpyDeviceToHost);
         cudaMemcpy(h_lepos, d_epos, sizeof(double) * n_ents * 3, cudaMemcpyDeviceToHost);
