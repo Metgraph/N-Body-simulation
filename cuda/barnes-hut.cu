@@ -279,6 +279,8 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz)
                         {
                             // ERRORs
                         }
+                    }else{
+                        child_val=LOCKED;
                     }
                 }
             } while (child_val == LOCKED);
@@ -388,7 +390,8 @@ __global__ void set_branch_values(Octtree *tree)
                 }
             }
         }
-        while (cache_sz > 0)
+        //TODO resolve divergence
+        do 
         {
             int completed = 0;
             // more easy to iterate
@@ -413,11 +416,15 @@ __global__ void set_branch_values(Octtree *tree)
                 }
             }
             cache_sz -= completed;
-        }
-        copy_arrs3(&tree->center[indx * 3], center, 0);
-        tree->ents[indx] = ents;
-        tree->mass[indx] = mass;
-        __threadfence();
+
+            if(cache_sz == 0){
+                copy_arrs3(&tree->center[indx * 3], center, 0);
+                tree->ents[indx] = ents;
+                tree->mass[indx] = mass;
+                __threadfence();
+
+            }
+        }while(cache_sz > 0);
     }
 }
 
@@ -431,11 +438,12 @@ __global__ void order_ents(Octtree *tree, int *sorted)
 
     // s is the position in the array where to write the body
     int s = 0;
+    //TODO check if there is a better way to wait that values have been loaded
     if (threadIdx.x == 0)
     {
         for (int i = 0; i < 8; i++)
         {
-            int node = tree->children[i * root * 8];
+            int node = tree->children[root * 8 + i];
 
             if (node >= root)
             { // not a leaf node
@@ -450,8 +458,9 @@ __global__ void order_ents(Octtree *tree, int *sorted)
         }
         __threadfence();
     }
+    __syncthreads();
 
-    int cell = root + id;
+    int cell = root + id+1;
     int tree_sz = tree->firstfree;
     while ((cell + offset) < tree_sz)
     {
@@ -510,7 +519,6 @@ __device__ double get_distance(double *r1, double *r2)
 }
 
 // TODO children must be compacted at the start of array
-// TODO remove id_in_warp, call bidimensional kernel
 __global__ void get_acceleration(Octtree *tree, Entities *ents, int ents_sz, size_t dt, uint shared_sz)
 {
     uint threads_sz = gridDim.x * blockDim.x;
@@ -522,7 +530,7 @@ __global__ void get_acceleration(Octtree *tree, Entities *ents, int ents_sz, siz
     extern __shared__ void *shared_mem;
     double *pos_node = (double *)shared_mem;
     double *mass_node = (pos_node + 3 * warps_sz * sizeof(double));
-    int *cache_node = (int *)(mass_node + warps_sz * sizeof(double));
+    int *cache_node = (int *)(mass_node + warps_sz * sizeof(int));
     int *stack = (cache_node + warps_sz * sizeof(int));
 
     const int cache_sz = shared_sz - 3 * warps_sz * sizeof(double) - warps_sz * sizeof(double) - warps_sz * sizeof(int);
@@ -534,7 +542,7 @@ __global__ void get_acceleration(Octtree *tree, Entities *ents, int ents_sz, siz
     ddt = (double)dt;
 
     // root is the first node located after the leaves, so each id must be an id of a leaf
-    for (int i = tid; i < ents_sz; i += threads_sz)
+    for (int i = tid; i < tree->root; i += threads_sz)
     {
         // initialize values
         pos_ent[0] = ents->pos[i * 3];
@@ -832,7 +840,7 @@ int main(int argc, char *argv[])
     for (size_t t = start; t < end; t += dt)
     {
         double *d_reduce_in, *d_reduce_out, *temp_swap;
-        block.x = 32;
+        block.x = cuda_prop.warpSize;
         block.y = 6;
         set_tree<<<1, block>>>(d_tree);
         cuda_err = cudaDeviceSynchronize();
@@ -866,11 +874,13 @@ int main(int argc, char *argv[])
         // uses 56 registers
         add_ent<<<opt_block, opt_thread>>>(d_tree, d_ents_struct, n_ents);
         cuda_err = cudaDeviceSynchronize();
+
         check_error(cuda_err);
 
         get_opt_grid(&cuda_prop, 0, 62, &opt_block, &opt_thread);
         // uses 62 registers
         set_branch_values<<<opt_block, opt_thread>>>(d_tree);
+        // set_branch_values<<<1, 10>>>(d_tree);
         cuda_err = cudaDeviceSynchronize();
         check_error(cuda_err);
 
@@ -885,7 +895,7 @@ int main(int argc, char *argv[])
         // uses 6 registers
         block.x = cuda_prop.warpSize;
         block.y = opt_thread / cuda_prop.warpSize;
-        get_acceleration<<<opt_block, opt_thread, cuda_prop.sharedMemPerBlock / cuda_prop.maxBlocksPerMultiProcessor>>>(d_tree, d_ents_struct, n_ents, dt, cuda_prop.sharedMemPerBlock);
+        get_acceleration<<<opt_block, block, cuda_prop.sharedMemPerBlock / cuda_prop.maxBlocksPerMultiProcessor>>>(d_tree, d_ents_struct, n_ents, dt, cuda_prop.sharedMemPerBlock);
         cuda_err = cudaDeviceSynchronize();
         check_error(cuda_err);
         cudaMemcpy(h_level, d_evel, sizeof(double) * n_ents * 3, cudaMemcpyDeviceToHost);
