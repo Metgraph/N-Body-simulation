@@ -722,7 +722,7 @@ int main(int argc, char *argv[])
     cudaError_t cuda_err;
     uint n_ents, *d_tents, opt_thread, opt_block, cache_sz;
     dim3 block;
-    int *d_tchildren, *d_tparent, *d_sorted_ents;
+    int *d_tchildren, *d_tparent, *d_sorted_nodes;
     size_t free_mem, total_mem;
     // *_e* memory for entity data
     // *_t* memory for tree data
@@ -774,7 +774,6 @@ int main(int argc, char *argv[])
     check_error(cuda_err);
     cuda_err = cudaMalloc(&d_emass, sizeof(double) * n_ents);
     check_error(cuda_err);
-    cuda_err = cudaMalloc(&d_sorted_ents, sizeof(int) * n_ents);
     check_error(cuda_err);
     if (n_ents > 1024 * 2)
     {
@@ -795,7 +794,11 @@ int main(int argc, char *argv[])
 
     cuda_err = cudaMemGetInfo(&free_mem, &total_mem);
     check_error(cuda_err);
-    nodes_sz = free_mem * 3 / 4 / node_mem;
+    // nodes_sz = free_mem * 3 / 4 / node_mem;
+    //add int to allocate an array for reordered 
+    nodes_sz = free_mem * 3 / 4 / (node_mem+sizeof(int));
+    cuda_err = cudaMalloc(&d_sorted_nodes, sizeof(int) * nodes_sz);
+    check_error(cuda_err);
     cuda_err = cudaMalloc(&d_tcenter, sizeof(double) * nodes_sz * 3);
     check_error(cuda_err);
     cuda_err = cudaMalloc(&d_tmass, sizeof(double) * nodes_sz);
@@ -887,7 +890,7 @@ int main(int argc, char *argv[])
         // maybe the max threads could be n_ents or some fraction like n_ents/2
         get_opt_grid(&cuda_prop, 0, 16, &opt_block, &opt_thread);
         // uses 16 registers
-        order_ents<<<opt_block, opt_thread>>>(d_tree, d_sorted_ents);
+        order_ents<<<opt_block, opt_thread>>>(d_tree, d_sorted_nodes);
         cuda_err = cudaDeviceSynchronize();
         check_error(cuda_err);
 
@@ -916,7 +919,7 @@ int main(int argc, char *argv[])
     cudaFree(d_tents);
     cudaFree(d_tparent);
     cudaFree(d_tchildren);
-    cudaFree(d_sorted_ents);
+    cudaFree(d_sorted_nodes);
     if (n_ents > 1024 * 2)
     {
         cudaFree(d_reduce1);
