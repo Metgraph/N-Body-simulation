@@ -3,3 +3,4 @@ test/
 build/
 tests/output.csv
 tests/output/
+main.py
