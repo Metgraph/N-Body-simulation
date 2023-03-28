@@ -539,9 +539,9 @@ __device__ void calculate_acceleration(double *pos_node, double mass_node, doubl
     r_unit_vector[1] = r_vector[1] / r_mag;
     r_unit_vector[2] = r_vector[2] / r_mag;
 
-    acc[0] = acceleration * r_unit_vector[0];
-    acc[1] = acceleration * r_unit_vector[1];
-    acc[2] = acceleration * r_unit_vector[2];
+    acc[0] += acceleration * r_unit_vector[0];
+    acc[1] += acceleration * r_unit_vector[1];
+    acc[2] += acceleration * r_unit_vector[2];
 }
 
 __device__ double get_distance(double *r1, double *r2)
