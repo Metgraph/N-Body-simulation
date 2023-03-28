@@ -33,6 +33,7 @@ typedef struct
     double *center; // allocation size must be three times the size of mass
     int *parent;
     int *children; // must have 8 slots for each node
+    int *depth;
 
 } Octtree;
 
@@ -126,7 +127,7 @@ __device__ void copy_arrs3(double *dest, double *src, uint indx)
     dest[indx + 2] = src[indx + 2];
 }
 
-__device__ void init_node(Octtree *tree, int indx)
+__device__ void init_node(Octtree *tree, int indx, int depth)
 {
     tree->center[indx * 3] = 0;
     tree->center[indx * 3 + 1] = 0;
@@ -134,6 +135,7 @@ __device__ void init_node(Octtree *tree, int indx)
     tree->mass[indx] = 0;
     tree->ents[indx] = 0;
     tree->parent[indx] = -1;
+    tree->depth[indx] = depth;
     for (uint i = 0; i < 8; i++)
     {
         tree->children[indx * 8 + i] = -1;
@@ -173,7 +175,7 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz)
 
         double pos_ent[3];
         // allocated is used as a boolean
-        int allocated, node_indx, ent_loc, child_indx, child_val, other;
+        int allocated, node_indx, ent_loc, child_indx, child_val, other, curr_depth;
         double border_size;
         // Octnode node;
         // set center of whole volume
@@ -187,6 +189,8 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz)
         node_indx = tree->root;
 
         border_size = border_tree(tree);
+
+        curr_depth=0;
 
         while (!allocated)
         {
@@ -206,6 +210,7 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz)
                     if (child_val ==
                         atomicCAS(&tree->children[child_indx], child_val, LOCKED))
                     {
+                        curr_depth++;
                         // if nothing is located, allocate the leaf
                         if (child_val == -1)
                         {
@@ -237,8 +242,9 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz)
                                 // }while(new_node==LOCKED || new_node!=atomicCAS(&tree->firstfree, new_node, LOCKED));
                                 // tree->firstfree=new_node+1;
 
-                                init_node(tree, new_node);
+                                init_node(tree, new_node, curr_depth);
                                 tree->parent[new_node] = node_indx;
+                                curr_depth++;
 
                                 // get leaf position in the new branch
                                 ent_loc = get_indx_loc(pos_ent, volume_center,
@@ -271,7 +277,8 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz)
 
                             tree->children[child_indx] = id;
                             tree->children[node_indx * 8 + other_loc] = other;
-                            tree->parent[id] = node_indx;
+                            // already done at the end
+                            // tree->parent[id] = node_indx;
                             tree->parent[other] = node_indx;
                             __threadfence();
                             // if there is a branch
@@ -301,6 +308,7 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz)
         tree->mass[id] = ent->mass[id];
         tree->ents[id] = 1;
         tree->parent[id] = node_indx;
+        tree->depth[id] = curr_depth;
     }
 }
 
@@ -559,7 +567,8 @@ __global__ void get_acceleration(Octtree *tree, Entities *ents, int ents_sz, siz
     __shared__ double pos_node[3 * 2];
     __shared__ double mass_node[2];
     __shared__ int cache_node[2];
-    __shared__ int stack[3072 / 4];
+    __shared__ int depth_node[2];
+    __shared__ int stack[3050 / 4 + 1];
 
     const int cache_sz = shared_sz - 3 * warps_sz * sizeof(double) - warps_sz * sizeof(double) - warps_sz * sizeof(int);
     // TODO adapt for more block
@@ -568,7 +577,7 @@ __global__ void get_acceleration(Octtree *tree, Entities *ents, int ents_sz, siz
     border = tree->max * 2;
     warp_id = threadIdx.y;
     // my_stack = &stack[cache_sz / warps_sz * warp_id];
-    my_stack = 3072 / 4 / 2 * warps_sz;
+    my_stack = 3050 / 4 / 2 * warps_sz +1;
     ddt = (double)dt;
 
     // root is the first node located after the leaves, so each id must be an id of a leaf
@@ -588,7 +597,7 @@ __global__ void get_acceleration(Octtree *tree, Entities *ents, int ents_sz, siz
         curr_node = tree->root;
 
         // start iterate algorithm, when depth<0 the algorithm has ended
-        while (depth >= 0)
+        while (stack_level >= 0)
         {
             for (int j = 0; j < 8; j++)
             {
@@ -596,27 +605,28 @@ __global__ void get_acceleration(Octtree *tree, Entities *ents, int ents_sz, siz
                 // TODO load only id and break if <0
                 if (id_in_warp == 0)
                 {
-                    double temp;
                     cache_node[warp_id] = tree->children[curr_node * 8 + j];
-                    if (cache_node[warp_id] >= 0)
-                    {
-                        temp = tree->center[cache_node[warp_id] * 3];
-                        pos_node[warp_id * 3] = temp;
-                        pos_node[warp_id * 3 + 1] = tree->center[cache_node[warp_id] * 3 + 1];
-                        pos_node[warp_id * 3 + 2] = tree->center[cache_node[warp_id] * 3 + 2];
-                        mass_node[warp_id] = tree->mass[cache_node[warp_id]];
-                    }
+                    
                 }
                 // be sure that every thread of block (but we are interested in thread in the same warp) can see the node
                 __threadfence_block();
                 if (cache_node[warp_id] >= 0)
                 {
+                    if (cache_node[warp_id] >= 0)
+                    {
+                        pos_node[warp_id * 3] = tree->center[cache_node[warp_id] * 3];
+                        pos_node[warp_id * 3 + 1] = tree->center[cache_node[warp_id] * 3 + 1];
+                        pos_node[warp_id * 3 + 2] = tree->center[cache_node[warp_id] * 3 + 2];
+                        mass_node[warp_id] = tree->mass[cache_node[warp_id]];
+                        depth_node[warp_id] = tree->depth[cache_node[warp_id]];
+                    }
                     if (cache_node[warp_id] != i)
                     {
                         double distance = get_distance(pos_ent, pos_node);
                         // if the node is a leaf or all thread in warp have their entity far enough from the body
-                        if (cache_node[warp_id] < tree->root || __all_sync(0xFFFFFFFF, (border / (1 << depth)) < THETA))
+                        if (cache_node[warp_id] < tree->root || __all_sync(0xFFFFFFFF, (border / (1<<depth_node[warp_id]))/distance < THETA))
                         {
+                            //probabilmente non calcola il sole
                             calculate_acceleration(&pos_node[warp_id * 3], mass_node[warp_id], pos_ent, mass_ent, acc_ent);
                         }
                         else
@@ -701,6 +711,10 @@ __global__ void set_tree(Octtree *tree)
             tree->children[root * 8 + threadIdx.x] = -1;
         }
         break;
+    case 6:
+        if(threadIdx.x==0){
+            tree->depth[root]=0;
+        }
     default:
         break;
     }
@@ -754,12 +768,13 @@ int main(int argc, char *argv[])
 {
     // opt_thread is value to optimize
     // the quantity of memory needed for each node
-    const int node_mem = sizeof(double) * 3 + sizeof(double) + sizeof(int) * 8 + sizeof(int) + sizeof(uint);
+    //                   pos                  mass             children          parent        ents_sz        depth
+    const int node_mem = sizeof(double) * 3 + sizeof(double) + sizeof(int) * 8 + sizeof(int) + sizeof(uint) + sizeof(int);
     cudaDeviceProp cuda_prop;
     cudaError_t cuda_err;
     uint n_ents, *d_tents, opt_thread, opt_block, cache_sz;
     dim3 block;
-    int *d_tchildren, *d_tparent, *d_sorted_nodes;
+    int *d_tchildren, *d_tparent, *d_sorted_nodes, *d_depth;
     size_t free_mem, total_mem;
     // *_e* memory for entity data
     // *_t* memory for tree data
@@ -785,7 +800,7 @@ int main(int argc, char *argv[])
     // }
     n_ents = get_entities("/home/prop/Documents/multicore/N-Body-simulation/tests/sun_earth.csv", &h_ents_struct);
     start = 0;
-    end = 86400 * 1000;
+    end = 86400 * 500;
     dt = 86400;
 
     cudaGetDeviceProperties(&cuda_prop, 0);
@@ -846,6 +861,7 @@ int main(int argc, char *argv[])
     check_error(cuda_err);
     cuda_err = cudaMalloc(&d_tchildren, sizeof(uint) * nodes_sz * 8);
     check_error(cuda_err);
+    cuda_err = cudaMalloc(&d_depth, sizeof(int)*nodes_sz);
 
     // initialize struct to be copied in vram
     h_ents_cpy.pos = d_epos;
@@ -858,6 +874,7 @@ int main(int argc, char *argv[])
     h_tree_cpy.parent = d_tparent;
     h_tree_cpy.children = d_tchildren;
     h_tree_cpy.root = n_ents;
+    h_tree_cpy.depth = d_depth;
 
     cuda_err = cudaMemcpy(d_tree, &h_tree_cpy, sizeof(Octtree), cudaMemcpyHostToDevice);
     check_error(cuda_err);
@@ -882,7 +899,7 @@ int main(int argc, char *argv[])
     {
         double *d_reduce_in, *d_reduce_out, *temp_swap;
         block.x = cuda_prop.warpSize;
-        block.y = 6;
+        block.y = 7;
         set_tree<<<1, block>>>(d_tree);
         cuda_err = cudaDeviceSynchronize();
         check_error(cuda_err);
@@ -959,6 +976,7 @@ int main(int argc, char *argv[])
     cudaFree(d_tparent);
     cudaFree(d_tchildren);
     cudaFree(d_sorted_nodes);
+    cudaFree(d_depth);
     if (n_ents > 1024 * 2)
     {
         cudaFree(d_reduce1);
