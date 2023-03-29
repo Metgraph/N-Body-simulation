@@ -526,9 +526,9 @@ __device__ void calculate_acceleration(double *pos_node, double mass_node, doubl
 {
     // RVec3 r_vector;
     double r_vector[3], r_unit_vector[3];
-    r_vector[0] = pos_node[0] - pos_ent[0];
-    r_vector[1] = pos_node[1] - pos_ent[1];
-    r_vector[2] = pos_node[2] - pos_ent[2];
+    r_vector[0] = pos_ent[0] - pos_node[0];
+    r_vector[1] = pos_ent[1] - pos_node[1];
+    r_vector[2] = pos_ent[2] - pos_node[2];
 
     double r_mag = sqrt(r_vector[0] * r_vector[0] + r_vector[1] * r_vector[1] +
                         r_vector[2] * r_vector[2]);
