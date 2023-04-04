@@ -577,6 +577,9 @@ __device__ int get_next_node(int curr_node, int parent, int children[], int last
     return curr_node;
 }
 
+// KERNEL 5
+// KERNEL 6
+// use __syncwarp
 __global__ void get_acceleration2(Octtree *tree, Entities *ents, int ents_sz, size_t dt, uint shared_sz)
 {
     uint threads_sz = gridDim.x * blockDim.x * blockDim.y;
@@ -699,6 +702,7 @@ __global__ void get_acceleration2(Octtree *tree, Entities *ents, int ents_sz, si
 
 // KERNEL 5
 // KERNEL 6
+// use __syncwarp
 //  TODO children must be compacted at the start of array
 __global__ void get_acceleration(Octtree *tree, Entities *ents, int ents_sz, size_t dt, uint shared_sz)
 {
