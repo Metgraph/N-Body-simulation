@@ -554,9 +554,153 @@ __device__ double get_distance(double *r1, double *r2)
     return sqrt((r1[0] - r2[0]) * (r1[0] - r2[0]) + (r1[1] - r2[1]) * (r1[1] - r2[1]) + (r1[2] - r2[2]) * (r1[2] - r2[2]));
 }
 
-//KERNEL 5
-//KERNEL 6
-// TODO children must be compacted at the start of array
+__device__ int get_next_node(int curr_node, int parent, int children[], int last_node)
+{
+    if (parent == last_node)
+    {
+        return children[0];
+    }
+    for (int i = 0; i < 7; i++)
+    {
+        if (children[i] == last_node)
+        {
+            if (children[i + 1] > -1)
+            {
+                return children[i + 1];
+            }
+            else
+            {
+                return curr_node;
+            }
+            break;
+        }
+    }
+    return curr_node;
+}
+
+__global__ void get_acceleration2(Octtree *tree, Entities *ents, int ents_sz, size_t dt, uint shared_sz)
+{
+    uint threads_sz = gridDim.x * blockDim.x * blockDim.y;
+    uint tid;
+    // 1024*48 is the total shared memory, remove space taken from double and from cache_node, divide for 32 (number of warps)
+    int id_in_warp, warp_id, warps_sz;
+    double pos_ent[3], mass_ent, border, acc_ent[3], ddt;
+    warps_sz = blockDim.y;
+    // extern __shared__ char shared_mem[];
+    // double *pos_node = (double *)shared_mem;
+    // //first cast to void so to shift in bytes
+    // double *mass_node = (double *)(((void *)pos_node) + 3 * warps_sz * sizeof(double));
+    // int *cache_node = (int *)(((void *)mass_node) + warps_sz * sizeof(double));
+    // int *stack = (int *)(((void *)cache_node) + warps_sz * sizeof(int));
+    __shared__ double pos_node[3 * 2];
+    __shared__ double mass_node[2];
+    __shared__ int cache_node[2];
+    __shared__ int depth_node[2];
+    __shared__ int curr_node[2];
+    __shared__ int last_node[2];
+
+    // TODO adapt for more block
+    // tid = (threadIdx.x + threadIdx.y * blockDim.x) + blockIdx.x * gridDim.x;
+    tid = (threadIdx.x + threadIdx.y * blockDim.x) + ( blockDim.x * blockDim.y * blockIdx.x);
+    id_in_warp = threadIdx.x;
+    border = tree->max * 2;
+    warp_id = threadIdx.y;
+    // my_stack = &stack[cache_sz / warps_sz * warp_id];
+    ddt = (double)dt;
+
+    // root is the first node located after the leaves, so each id must be an id of a leaf
+    for (int i = tid; i < ents_sz; i += threads_sz)
+    {
+        // initialize values
+        pos_ent[0] = ents->pos[i * 3];
+        pos_ent[1] = ents->pos[i * 3 + 1];
+        pos_ent[2] = ents->pos[i * 3 + 2];
+        mass_ent = ents->mass[i];
+        acc_ent[0] = 0;
+        acc_ent[1] = 0;
+        acc_ent[2] = 0;
+        if (id_in_warp == 0){
+            curr_node[warp_id] = tree->root;
+            last_node[warp_id] = -1;
+            __threadfence_block();
+        }
+        __syncwarp();
+
+        // start iterate algorithm, when depth<0 the algorithm has ended
+        while (curr_node[warp_id] > -1)
+        {
+            if (id_in_warp == 0)
+            {
+                cache_node[warp_id] = get_next_node(curr_node[warp_id], tree->parent[curr_node[warp_id]], &tree->children[curr_node[warp_id] * 8], last_node[warp_id]);
+                __threadfence_block();
+            }
+            __syncwarp();
+            if (cache_node[warp_id] == curr_node[warp_id])
+            {
+                if(id_in_warp == 0){
+                    last_node[warp_id] = curr_node[warp_id];
+                    curr_node[warp_id] = tree->parent[curr_node[warp_id]];
+                    __threadfence_block();
+                }
+                __syncwarp();
+                continue;
+            }
+            if (id_in_warp == 0)
+            {
+                // be sure that every thread of block (but we are interested in thread in the same warp) can see the node
+                pos_node[warp_id * 3] = tree->center[cache_node[warp_id] * 3];
+                pos_node[warp_id * 3 + 1] = tree->center[cache_node[warp_id] * 3 + 1];
+                pos_node[warp_id * 3 + 2] = tree->center[cache_node[warp_id] * 3 + 2];
+                mass_node[warp_id] = tree->mass[cache_node[warp_id]];
+                depth_node[warp_id] = tree->depth[cache_node[warp_id]];
+                __threadfence_block();
+            }
+            __syncwarp();
+            // if a node not enter in this that's mean that current node is a leaf
+            double distance = get_distance(pos_ent, &pos_node[warp_id*3]);
+            // if the node is a leaf or all thread in warp have their entity far enough from the body
+            if (cache_node[warp_id] < tree->root || __all_sync(0xFFFFFFFF, (border / (1 << depth_node[warp_id])) / distance < THETA))
+            {
+                // probabilmente non calcola il sole
+                if (cache_node[warp_id] != i){
+                    calculate_acceleration(&pos_node[warp_id * 3], mass_node[warp_id], pos_ent, mass_ent, acc_ent);
+                }
+                if (id_in_warp == 0)
+                {
+                    last_node[warp_id] = cache_node[warp_id];
+                    __threadfence_block();
+                }
+            }
+            else
+            {
+                if (id_in_warp == 0)
+                {
+                    last_node[warp_id] = curr_node[warp_id];
+                    curr_node[warp_id] = cache_node[warp_id];
+                    __threadfence_block();
+                }
+            }
+            __syncwarp();
+
+        }
+        // update velocities
+        ents->vel[i * 3] += acc_ent[0] * ddt;
+        ents->vel[i * 3 + 1] += acc_ent[1] * ddt;
+        ents->vel[i * 3 + 2] += acc_ent[2] * ddt;
+    }
+
+    // maybe that can be included in previous loop
+    for (int i = tid; i < ents_sz; i += threads_sz)
+    {
+        ents->pos[i * 3] += ents->vel[i * 3] * ddt;
+        ents->pos[i * 3 + 1] += ents->vel[i * 3 + 1] * ddt;
+        ents->pos[i * 3 + 2] += ents->vel[i * 3 + 2] * ddt;
+    }
+}
+
+// KERNEL 5
+// KERNEL 6
+//  TODO children must be compacted at the start of array
 __global__ void get_acceleration(Octtree *tree, Entities *ents, int ents_sz, size_t dt, uint shared_sz)
 {
     uint threads_sz = gridDim.x * blockDim.x * blockDim.y;
