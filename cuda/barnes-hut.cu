@@ -1065,11 +1065,9 @@ int main(int argc, char *argv[])
         block.y = 7;
         set_tree<<<1, block>>>(d_tree);
         cuda_err = cudaDeviceSynchronize();
-        // printf("PORCODIO\n");
         check_error(cuda_err);
         get_bounding_box<<<(n_ents - 1) / (max_threads * 2) + 1, max_threads, max_threads * sizeof(double)>>>(d_epos, n_ents, d_reduce1);
         cuda_err = cudaDeviceSynchronize();
-        // printf("DIOCANE\n");
         check_error(cuda_err);
         d_reduce_in = d_reduce2;
         d_reduce_out = d_reduce1;
@@ -1093,13 +1091,11 @@ int main(int argc, char *argv[])
             cuda_err = cudaDeviceSynchronize();
             check_error(cuda_err);
         }
-        // printf("DIOSUPERCANE\n");
         get_opt_grid(&cuda_prop, n_ents, 56, &opt_block, &opt_thread);
         // uses 56 registers
         add_ent<<<opt_block, opt_thread>>>(d_tree, d_ents_struct, n_ents);
         // add_ent<<<1, 128>>>(d_tree, d_ents_struct, n_ents);
         cuda_err = cudaDeviceSynchronize();
-        // printf("GESUBASTARDO\n");
 
         check_error(cuda_err);
 
@@ -1108,7 +1104,6 @@ int main(int argc, char *argv[])
         set_branch_values<<<opt_block, opt_thread>>>(d_tree);
         // set_branch_values<<<1, 10>>>(d_tree);
         cuda_err = cudaDeviceSynchronize();
-        // printf("MADONNATROIA\n");
         check_error(cuda_err);
 
         // maybe the max threads could be n_ents or some fraction like n_ents/2
@@ -1116,7 +1111,6 @@ int main(int argc, char *argv[])
         // uses 16 registers
         order_ents<<<opt_block, opt_thread>>>(d_tree, d_sorted_nodes);
         cuda_err = cudaDeviceSynchronize();
-        // printf("DIOLADRO\n");
         check_error(cuda_err);
 
         get_opt_grid(&cuda_prop, n_ents, 6, &opt_block, &opt_thread);
@@ -1126,7 +1120,6 @@ int main(int argc, char *argv[])
         printf("%lu\n", t);
         get_acceleration2<<<opt_block, block, cuda_prop.sharedMemPerBlock / cuda_prop.maxBlocksPerMultiProcessor>>>(d_tree, d_ents_struct, n_ents, dt, cuda_prop.sharedMemPerBlock);
         cuda_err = cudaDeviceSynchronize();
-        // printf("DIOBASTARDO\n");
         check_error(cuda_err);
         cudaMemcpy(h_level, d_evel, sizeof(double) * n_ents * 3, cudaMemcpyDeviceToHost);
         cudaMemcpy(h_lepos, d_epos, sizeof(double) * n_ents * 3, cudaMemcpyDeviceToHost);
