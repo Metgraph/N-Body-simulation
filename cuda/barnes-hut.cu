@@ -164,6 +164,7 @@ __device__ int get_indx_loc(double *pos, double *center, double *border_size)
     return indx;
 }
 
+//KERNEL 2
 // add a entity in the tree
 // it's create all the needed branch
 // the leaf of the tree are biunivocaly (e' inglese?) associated to an entity
@@ -312,6 +313,7 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz)
     }
 }
 
+//KERNEL 1
 // TODO write a more optimized function
 __global__ void get_bounding_box(double *g_idata, int ents_sz, double *g_odata)
 {
@@ -359,6 +361,7 @@ __global__ void get_bounding_box(double *g_idata, int ents_sz, double *g_odata)
     }
 }
 
+//KERNEL 3
 // if mass==0 node is not ready
 __global__ void set_branch_values(Octtree *tree)
 {
@@ -459,6 +462,7 @@ __global__ void set_branch_values(Octtree *tree)
     }
 }
 
+//KERNEL 4
 // here tree->parent will be used to store the "s", the position where to write values (tree->parent is not needed anymore)
 __global__ void order_ents(Octtree *tree, int *sorted)
 {
@@ -521,6 +525,9 @@ __global__ void order_ents(Octtree *tree, int *sorted)
     }
 }
 
+//KERNEL 5
+//KERNEL 6
+//il paper mette il calcolo delle accelerazioni nel kernel 5 e l'aggiornamento e velocita' nel kernel 6
 __device__ void calculate_acceleration(double *pos_node, double mass_node, double *pos_ent, double mass_ent,
                                        double acc[])
 {
