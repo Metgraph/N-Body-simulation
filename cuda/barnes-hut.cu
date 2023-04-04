@@ -525,8 +525,6 @@ __global__ void order_ents(Octtree *tree, int *sorted)
     }
 }
 
-//KERNEL 5
-//KERNEL 6
 //il paper mette il calcolo delle accelerazioni nel kernel 5 e l'aggiornamento e velocita' nel kernel 6
 __device__ void calculate_acceleration(double *pos_node, double mass_node, double *pos_ent, double mass_ent,
                                        double acc[])
@@ -556,6 +554,8 @@ __device__ double get_distance(double *r1, double *r2)
     return sqrt((r1[0] - r2[0]) * (r1[0] - r2[0]) + (r1[1] - r2[1]) * (r1[1] - r2[1]) + (r1[2] - r2[2]) * (r1[2] - r2[2]));
 }
 
+//KERNEL 5
+//KERNEL 6
 // TODO children must be compacted at the start of array
 __global__ void get_acceleration(Octtree *tree, Entities *ents, int ents_sz, size_t dt, uint shared_sz)
 {
