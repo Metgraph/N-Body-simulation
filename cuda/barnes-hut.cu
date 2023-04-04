@@ -6,6 +6,8 @@
 
 #define LOCKED -2
 
+//compute-sanitizer --tool memcheck
+// https://docs.nvidia.com/compute-sanitizer/ComputeSanitizer/index.html
 typedef unsigned int uint;
 
 typedef struct
@@ -34,6 +36,7 @@ typedef struct
     int *parent;
     int *children; // must have 8 slots for each node
     int *depth;
+    uint *shift;
 
 } Octtree;
 
@@ -164,10 +167,10 @@ __device__ int get_indx_loc(double *pos, double *center, double *border_size)
     return indx;
 }
 
-//KERNEL 2
-// add a entity in the tree
-// it's create all the needed branch
-// the leaf of the tree are biunivocaly (e' inglese?) associated to an entity
+// KERNEL 2
+//  add a entity in the tree
+//  it's create all the needed branch
+//  the leaf of the tree are biunivocaly (e' inglese?) associated to an entity
 __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz)
 {
     int id = threadIdx.x + blockIdx.x * blockDim.x;
@@ -191,7 +194,7 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz)
 
         border_size = border_tree(tree);
 
-        curr_depth=0;
+        curr_depth = 0;
 
         while (!allocated)
         {
@@ -238,10 +241,6 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz)
                                 // new node location
                                 // atomic add return old value
                                 new_node = atomicAdd(&tree->firstfree, 1);
-                                // do{
-                                //     new_node=tree->firstfree;
-                                // }while(new_node==LOCKED || new_node!=atomicCAS(&tree->firstfree, new_node, LOCKED));
-                                // tree->firstfree=new_node+1;
 
                                 init_node(tree, new_node, curr_depth);
                                 tree->parent[new_node] = node_indx;
@@ -313,8 +312,8 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz)
     }
 }
 
-//KERNEL 1
-// TODO write a more optimized function
+// KERNEL 1
+//  TODO write a more optimized function
 __global__ void get_bounding_box(double *g_idata, int ents_sz, double *g_odata)
 {
     extern __shared__ double sdata[];
@@ -361,8 +360,8 @@ __global__ void get_bounding_box(double *g_idata, int ents_sz, double *g_odata)
     }
 }
 
-//KERNEL 3
-// if mass==0 node is not ready
+// KERNEL 3
+//  if mass==0 node is not ready
 __global__ void set_branch_values(Octtree *tree)
 {
     int sz_threads = gridDim.x * blockDim.x;
@@ -462,8 +461,8 @@ __global__ void set_branch_values(Octtree *tree)
     }
 }
 
-//KERNEL 4
-// here tree->parent will be used to store the "s", the position where to write values (tree->parent is not needed anymore)
+// KERNEL 4
+//  here tree->parent will be used to store the "s", the position where to write values (tree->parent is not needed anymore)
 __global__ void order_ents(Octtree *tree, int *sorted)
 {
     uint id = threadIdx.x + blockIdx.x * blockDim.x;
@@ -482,7 +481,7 @@ __global__ void order_ents(Octtree *tree, int *sorted)
 
             if (node >= root)
             { // not a leaf node
-                tree->parent[node] = s;
+                tree->shift[node] = s;
                 s += tree->ents[node];
             }
             else if (node >= 0)
@@ -499,7 +498,7 @@ __global__ void order_ents(Octtree *tree, int *sorted)
     int tree_sz = tree->firstfree;
     while ((cell + offset) < tree_sz)
     {
-        s = tree->parent[cell + offset];
+        s = tree->shift[cell + offset];
 
         if (s >= 0)
         {
@@ -510,7 +509,7 @@ __global__ void order_ents(Octtree *tree, int *sorted)
 
                 if (node >= root)
                 { // not a leaf node
-                    tree->parent[node] = s;
+                    tree->shift[node] = s;
                     s += tree->ents[node];
                 }
                 else if (node >= 0)
@@ -525,7 +524,7 @@ __global__ void order_ents(Octtree *tree, int *sorted)
     }
 }
 
-//il paper mette il calcolo delle accelerazioni nel kernel 5 e l'aggiornamento e velocita' nel kernel 6
+// il paper mette il calcolo delle accelerazioni nel kernel 5 e l'aggiornamento e velocita' nel kernel 6
 __device__ void calculate_acceleration(double *pos_node, double mass_node, double *pos_ent, double mass_ent,
                                        double acc[])
 {
@@ -723,12 +722,12 @@ __global__ void get_acceleration(Octtree *tree, Entities *ents, int ents_sz, siz
 
     const int cache_sz = shared_sz - 3 * warps_sz * sizeof(double) - warps_sz * sizeof(double) - warps_sz * sizeof(int);
     // TODO adapt for more block
-    tid = (threadIdx.x + threadIdx.y * blockDim.x) + blockIdx.x * gridDim.x;
+    tid = (threadIdx.x + threadIdx.y * blockDim.x) + ( blockDim.x * blockDim.y * blockIdx.x);
     id_in_warp = threadIdx.x;
     border = tree->max * 2;
     warp_id = threadIdx.y;
     // my_stack = &stack[cache_sz / warps_sz * warp_id];
-    my_stack = 3050 / 4 / 2 * warps_sz +1;
+    my_stack = 3050 / 4 / 2 * warps_sz + 1;
     ddt = (double)dt;
 
     // root is the first node located after the leaves, so each id must be an id of a leaf
@@ -757,10 +756,10 @@ __global__ void get_acceleration(Octtree *tree, Entities *ents, int ents_sz, siz
                 if (id_in_warp == 0)
                 {
                     cache_node[warp_id] = tree->children[curr_node * 8 + j];
-                    
+                    __threadfence_block();
                 }
+                __syncwarp();
                 // be sure that every thread of block (but we are interested in thread in the same warp) can see the node
-                __threadfence_block();
                 if (cache_node[warp_id] >= 0)
                 {
                     if (cache_node[warp_id] >= 0)
@@ -770,29 +769,31 @@ __global__ void get_acceleration(Octtree *tree, Entities *ents, int ents_sz, siz
                         pos_node[warp_id * 3 + 2] = tree->center[cache_node[warp_id] * 3 + 2];
                         mass_node[warp_id] = tree->mass[cache_node[warp_id]];
                         depth_node[warp_id] = tree->depth[cache_node[warp_id]];
+                        __threadfence_block();
                     }
-                    if (cache_node[warp_id] != i)
+                    __syncwarp();
+                    double distance = get_distance(pos_ent, &pos_node[warp_id*3]);
+                    // if the node is a leaf or all thread in warp have their entity far enough from the body
+                    if (cache_node[warp_id] < tree->root || __all_sync(0xFFFFFFFF, (border / (1 << depth_node[warp_id])) / distance < THETA))
                     {
-                        double distance = get_distance(pos_ent, pos_node);
-                        // if the node is a leaf or all thread in warp have their entity far enough from the body
-                        if (cache_node[warp_id] < tree->root || __all_sync(0xFFFFFFFF, (border / (1<<depth_node[warp_id]))/distance < THETA))
-                        {
-                            //probabilmente non calcola il sole
+                        // probabilmente non calcola il sole
+                        if(cache_node[warp_id] != i){
                             calculate_acceleration(&pos_node[warp_id * 3], mass_node[warp_id], pos_ent, mass_ent, acc_ent);
                         }
-                        else
+                    }
+                    else
+                    {
+                        // save node in stack, when node will be taken from the stack, the programm will check its children
+                        depth++;
+                        if (id_in_warp == 0)
                         {
-                            // save node in stack, when node will be taken from the stack, the programm will check its children
-                            depth++;
-                            if (id_in_warp == 0)
-                            {
-                                // my_stack[stack_level] = cache_node[warp_id];
-                                stack[my_stack + stack_level] = cache_node[warp_id];
-                            }
-                            stack_level++;
+                            // my_stack[stack_level] = cache_node[warp_id];
+                            stack[my_stack + stack_level] = cache_node[warp_id];
                             __threadfence_block();
                         }
+                        stack_level++;
                     }
+                    __syncwarp();
                 }
                 else
                 {
@@ -863,8 +864,9 @@ __global__ void set_tree(Octtree *tree)
         }
         break;
     case 6:
-        if(threadIdx.x==0){
-            tree->depth[root]=0;
+        if (threadIdx.x == 0)
+        {
+            tree->depth[root] = 0;
         }
     default:
         break;
@@ -920,10 +922,10 @@ int main(int argc, char *argv[])
     // opt_thread is value to optimize
     // the quantity of memory needed for each node
     //                   pos                  mass             children          parent        ents_sz        depth
-    const int node_mem = sizeof(double) * 3 + sizeof(double) + sizeof(int) * 8 + sizeof(int) + sizeof(uint) + sizeof(int);
+    const int node_mem = sizeof(double) * 3 + sizeof(double) + sizeof(int) * 8 + sizeof(int) + sizeof(uint) + sizeof(int) + sizeof(uint);
     cudaDeviceProp cuda_prop;
     cudaError_t cuda_err;
-    uint n_ents, *d_tents, opt_thread, opt_block, cache_sz;
+    uint n_ents, *d_tents, opt_thread, opt_block, cache_sz, *d_shift;
     dim3 block;
     int *d_tchildren, *d_tparent, *d_sorted_nodes, *d_depth;
     size_t free_mem, total_mem;
@@ -949,10 +951,11 @@ int main(int argc, char *argv[])
     // {
     //     cache_sz = strtoul(argv[6], NULL, 10);
     // }
-    n_ents = get_entities("/home/prop/Documents/multicore/N-Body-simulation/tests/sun_earth.csv", &h_ents_struct);
+    //stop at 1056
+    n_ents = get_entities("/home/prop/Documents/multicore/N-Body-simulation/tests/2000_bodies.csv", &h_ents_struct);
     start = 0;
-    end = 86400 * 500;
-    dt = 86400;
+    dt = 1;
+    end = dt * 20;
 
     cudaGetDeviceProperties(&cuda_prop, 0);
 
@@ -977,7 +980,7 @@ int main(int argc, char *argv[])
     check_error(cuda_err);
     cuda_err = cudaMalloc(&d_emass, sizeof(double) * n_ents);
     check_error(cuda_err);
-    check_error(cuda_err);
+
     if (n_ents > 1024 * 2)
     {
         cuda_err = cudaMalloc(&d_reduce1, sizeof(double) * ((n_ents * 3 - 1) / 1024 + 1));
@@ -1000,6 +1003,7 @@ int main(int argc, char *argv[])
     // nodes_sz = free_mem * 3 / 4 / node_mem;
     // add int to allocate an array for reordered
     nodes_sz = free_mem * 3 / 4 / (node_mem + sizeof(int));
+    printf("FREE MEM: %lu\nLEN NODES: %d\n", free_mem, nodes_sz);
     cuda_err = cudaMalloc(&d_sorted_nodes, sizeof(int) * nodes_sz);
     check_error(cuda_err);
     cuda_err = cudaMalloc(&d_tcenter, sizeof(double) * nodes_sz * 3);
@@ -1012,7 +1016,10 @@ int main(int argc, char *argv[])
     check_error(cuda_err);
     cuda_err = cudaMalloc(&d_tchildren, sizeof(uint) * nodes_sz * 8);
     check_error(cuda_err);
-    cuda_err = cudaMalloc(&d_depth, sizeof(int)*nodes_sz);
+    cuda_err = cudaMalloc(&d_depth, sizeof(int) * nodes_sz);
+    check_error(cuda_err);
+    cuda_err = cudaMalloc(&d_shift, sizeof(uint) * nodes_sz);
+    check_error(cuda_err);
 
     // initialize struct to be copied in vram
     h_ents_cpy.pos = d_epos;
@@ -1026,6 +1033,7 @@ int main(int argc, char *argv[])
     h_tree_cpy.children = d_tchildren;
     h_tree_cpy.root = n_ents;
     h_tree_cpy.depth = d_depth;
+    h_tree_cpy.shift = d_shift;
 
     cuda_err = cudaMemcpy(d_tree, &h_tree_cpy, sizeof(Octtree), cudaMemcpyHostToDevice);
     check_error(cuda_err);
@@ -1053,9 +1061,11 @@ int main(int argc, char *argv[])
         block.y = 7;
         set_tree<<<1, block>>>(d_tree);
         cuda_err = cudaDeviceSynchronize();
+        // printf("PORCODIO\n");
         check_error(cuda_err);
         get_bounding_box<<<(n_ents - 1) / (max_threads * 2) + 1, max_threads, max_threads * sizeof(double)>>>(d_epos, n_ents, d_reduce1);
         cuda_err = cudaDeviceSynchronize();
+        // printf("DIOCANE\n");
         check_error(cuda_err);
         d_reduce_in = d_reduce2;
         d_reduce_out = d_reduce1;
@@ -1079,11 +1089,13 @@ int main(int argc, char *argv[])
             cuda_err = cudaDeviceSynchronize();
             check_error(cuda_err);
         }
+        // printf("DIOSUPERCANE\n");
         get_opt_grid(&cuda_prop, n_ents, 56, &opt_block, &opt_thread);
         // uses 56 registers
         add_ent<<<opt_block, opt_thread>>>(d_tree, d_ents_struct, n_ents);
         // add_ent<<<1, 128>>>(d_tree, d_ents_struct, n_ents);
         cuda_err = cudaDeviceSynchronize();
+        // printf("GESUBASTARDO\n");
 
         check_error(cuda_err);
 
@@ -1092,6 +1104,7 @@ int main(int argc, char *argv[])
         set_branch_values<<<opt_block, opt_thread>>>(d_tree);
         // set_branch_values<<<1, 10>>>(d_tree);
         cuda_err = cudaDeviceSynchronize();
+        // printf("MADONNATROIA\n");
         check_error(cuda_err);
 
         // maybe the max threads could be n_ents or some fraction like n_ents/2
@@ -1099,14 +1112,17 @@ int main(int argc, char *argv[])
         // uses 16 registers
         order_ents<<<opt_block, opt_thread>>>(d_tree, d_sorted_nodes);
         cuda_err = cudaDeviceSynchronize();
+        // printf("DIOLADRO\n");
         check_error(cuda_err);
 
         get_opt_grid(&cuda_prop, n_ents, 6, &opt_block, &opt_thread);
         // uses 6 registers
         block.x = cuda_prop.warpSize;
         block.y = opt_thread / cuda_prop.warpSize;
-        get_acceleration<<<opt_block, block, cuda_prop.sharedMemPerBlock / cuda_prop.maxBlocksPerMultiProcessor>>>(d_tree, d_ents_struct, n_ents, dt, cuda_prop.sharedMemPerBlock);
+        printf("%lu\n", t);
+        get_acceleration2<<<opt_block, block, cuda_prop.sharedMemPerBlock / cuda_prop.maxBlocksPerMultiProcessor>>>(d_tree, d_ents_struct, n_ents, dt, cuda_prop.sharedMemPerBlock);
         cuda_err = cudaDeviceSynchronize();
+        // printf("DIOBASTARDO\n");
         check_error(cuda_err);
         cudaMemcpy(h_level, d_evel, sizeof(double) * n_ents * 3, cudaMemcpyDeviceToHost);
         cudaMemcpy(h_lepos, d_epos, sizeof(double) * n_ents * 3, cudaMemcpyDeviceToHost);
@@ -1128,6 +1144,7 @@ int main(int argc, char *argv[])
     cudaFree(d_tchildren);
     cudaFree(d_sorted_nodes);
     cudaFree(d_depth);
+    cudaFree(d_shift);
     if (n_ents > 1024 * 2)
     {
         cudaFree(d_reduce1);
