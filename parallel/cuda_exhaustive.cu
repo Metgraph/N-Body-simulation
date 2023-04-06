@@ -234,9 +234,9 @@ void propagation(double *masses, double *positions, double *velocities, uint ent
 //            r_vector.y = positions[myID*3+1] - positions[m2_idx*3+1];
 //            r_vector.z = positions[myID*3+2] - positions[m2_idx*3+2];
 
-            r_vector.x = g_positions[myID*3].x - g_positions[m2_idx*3].x;
-            r_vector.y = g_positions[myID*3].y - g_positions[m2_idx*3].y;
-            r_vector.z = g_positions[myID*3].z - g_positions[m2_idx*3].z;
+            r_vector.x = g_positions[myID].x - g_positions[m2_idx].x;
+            r_vector.y = g_positions[myID].y - g_positions[m2_idx].y;
+            r_vector.z = g_positions[myID].z - g_positions[m2_idx].z;
 
             printf("DEBUG: Rvector: x: %f, y: %f, z: %f\n", r_vector.x, r_vector.y, r_vector.x);
 
@@ -259,9 +259,9 @@ void propagation(double *masses, double *positions, double *velocities, uint ent
             printf("DEBUG: a_g fine ciclo interno: x: %f, y: %f, z: %f\n", a_g.x, a_g.y, a_g.z);
         }
     }
-    g_velocities[myID*3].x += a_g.x * dt;
-    g_velocities[myID*3].y += a_g.y * dt;
-    g_velocities[myID*3].z += a_g.z * dt;
+    g_velocities[myID].x += a_g.x * dt;
+    g_velocities[myID].y += a_g.y * dt;
+    g_velocities[myID].z += a_g.z * dt;
     printf("DEBUG: Update velocities, end kernel: %f, %f, %f\n", velocities[myID*3], velocities[myID*3 + 1], velocities[myID*3 + 2]);
 }
 
