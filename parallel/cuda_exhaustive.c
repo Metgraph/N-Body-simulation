@@ -197,7 +197,7 @@ void update_positions(double *positions, double *velocities, uint ents_sz, size_
 
 void write_positions(double *positions, double *velocities, uint ents_sz, FILE *fpt){
     for (size_t entity_idx = 0; entity_idx < ents_sz; entity_idx++) {
-        fprintf(fpt,  "%u,%lf,%lf,%lf,%lf,%lf,%lf \n",
+        fprintf(fpt,  "%lu,%lf,%lf,%lf,%lf,%lf,%lf\n",
             entity_idx,
             positions[entity_idx*3    ],
             positions[entity_idx*3 + 1],
