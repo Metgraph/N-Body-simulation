@@ -8,13 +8,7 @@
 
 typedef unsigned int uint;
 
-typedef struct {
-    double x;
-    double y;
-    double z;
-} RVec3;
-
-__constant__ double BIG_G = 6.67e-11;
+__constant__ double BIG_G = 6.67e-11; // Nella read-only cache e condivisa dai thread del blocco
 
 __host__ void get_entities(char filename[], uint *n_ents, double **positions, double **velocities);
 __host__ void count_entities_file(char *filename, uint *n);
@@ -47,9 +41,9 @@ int main(int argc, char *argv[]) {
 }
 
 __host__
-void cuda_check_error(cudaError_t error) {
+void cuda_check_error(cudaError_t error, const char *message) {
     if (error != cudaSuccess) {
-        fprintf(stderr, "Error: %s\n", cudaGetErrorString(error));
+        fprintf(stderr, "Error: %s\nLine: %s", cudaGetErrorString(error), message);
         exit(EXIT_FAILURE);
     }
 }
@@ -62,15 +56,14 @@ void run(double *h_positions, double *h_velocities, uint ents_sz, size_t t_start
     double *d_velocities;
 
     error = cudaMalloc((void **)&d_positions, ents_sz * 4 * sizeof(double));
-    cuda_check_error(error);
+    cuda_check_error(error, "Device positions malloc\n");
     error = cudaMalloc((void **)&d_velocities, ents_sz * 3 * sizeof(double));
-    cuda_check_error(error);
+    cuda_check_error(error, "Device velocities malloc\n");
 
-    cuda_check_error(error);
-    error = cudaMemcpy(d_positions, h_positions, ents_sz * 3 * sizeof(double), cudaMemcpyHostToDevice);
-    cuda_check_error(error);
-    error = cudaMemcpy(d_velocities, h_velocities, ents_sz * 4 * sizeof(double), cudaMemcpyHostToDevice);
-    cuda_check_error(error);
+    error = cudaMemcpy(d_positions, h_positions, ents_sz * 4 * sizeof(double), cudaMemcpyHostToDevice);
+    cuda_check_error(error, "Host do Device copy positions\n");
+    error = cudaMemcpy(d_velocities, h_velocities, ents_sz * 3 * sizeof(double), cudaMemcpyHostToDevice);
+    cuda_check_error(error, "Host to Device copy velocities\n");
 
 //    printf("\nDEBUG: valori letti - parte c\n");
 //    for (size_t entity_idx = 0; entity_idx < ents_sz; entity_idx++) {
@@ -87,20 +80,16 @@ void run(double *h_positions, double *h_velocities, uint ents_sz, size_t t_start
 
     fpt = fopen(output, "w");
     for(size_t t = t_start; t < t_end; t += dt) { //Ciclo sul tempo
-        fprintf(stderr, "Lanciando il primo kernel\n");
-        propagation<<<1, 9, 9 * sizeof(double4)>>>(d_positions, d_velocities, ents_sz, (double) dt);
+        propagation<<<2, 10, 10 * sizeof(double) * 4>>>(d_positions, d_velocities, ents_sz, (double) dt);
         cudaDeviceSynchronize();
-        fprintf(stderr, "Lanciando il secondo kernel\n");
         update_positions<<<1, 9>>>(d_positions, d_velocities, ents_sz, (double) dt);
         cudaDeviceSynchronize();
 
         // memcopy da device a host
-
-        fprintf(stderr, "Copiando la memoria\n");
         error = cudaMemcpy(h_positions, d_positions, ents_sz * 4 * sizeof(double), cudaMemcpyDeviceToHost);
-        cuda_check_error(error);
+        cuda_check_error(error, "Device to Host copy positions\n");
         error = cudaMemcpy(h_velocities, d_velocities, ents_sz * 3 * sizeof(double), cudaMemcpyDeviceToHost);
-        cuda_check_error(error);
+        cuda_check_error(error, "Device to Host copy positions\n");
 
         write_positions(h_positions, h_velocities, ents_sz, fpt);
     }
@@ -163,23 +152,22 @@ void get_entities(char filename[], uint *n_ents, double **positions, double **ve
 
     file = fopen(filename, "r");
     if (!file) {
-        fprintf(stderr, "Error opening file '%s'\n", filename);
+        fprintf(stderr, "Error while opening file '%s'\n", filename);
         exit(1);
     }
 
-    safe_malloc_double(positions, *n_ents * 3);
-    safe_malloc_double(velocities, *n_ents * 4);
-    fprintf(stderr, "File Aperto\n");
+    safe_malloc_double(positions, *n_ents * 4);
+    safe_malloc_double(velocities, *n_ents * 3);
     i = 0;
 
     while ((fscanf(file, "%lf, %lf, %lf, %lf, %lf, %lf, %lf\n",
-                        &((*positions)[i*3  ] ),
-                        &((*positions)[i*3+1] ),
-                        &((*positions)[i*3+2] ),
+                        &((*positions)[i*4  ] ),
+                        &((*positions)[i*4+1] ),
+                        &((*positions)[i*4+2] ),
                         &((*velocities)[i*3  ]),
                         &((*velocities)[i*3+1]),
                         &((*velocities)[i*3+2]),
-                        &((*positions)[i*3+3])       )) == 7) {
+                        &((*positions)[i*4+3]))) == 7) {
         i++;
     }
     // check if while ended because the end of the file has been reached
@@ -191,7 +179,6 @@ void get_entities(char filename[], uint *n_ents, double **positions, double **ve
     // Update n_ents with the correct number of scanned lines
     *n_ents = i;
     fclose(file);
-    fprintf(stderr, "Scritti %d su memoria\n", *n_ents);
 }
 
 __global__
@@ -200,8 +187,25 @@ void propagation(double *positions, double *velocities, uint ents_sz, double dt)
     /* printf("Thread id: %u\n", tid); */
     /* printf("%lf,%lf,%lf,%lf,%lf,%lf,%lf \n", masses[0], positions[0], positions[1], positions[2], velocities[0], velocities[1], velocities[3]); */
     printf("DEBUG: dati inizio kernel\n");
+    extern __shared__ double4 shPositions[];
+    double4 *gPositions;
+    double3 *gVelocities;
+    double3 r_vector; // Spostato da sotto - lo alloco una sola volta
+    double3 a_g;
+    int myId;
+    int i;
+    int iteration;
+    int firstPos;
+    double3 myBodyPos;
+
+    gPositions = (double4 *) positions;
+    gVelocities = (double3 *) velocities;
+    a_g = {0.0, 0.0, 0.0};
+    myId = blockIdx.x * blockDim.x + threadIdx.x;
+
     for (int i=0; i < ents_sz; i++){
-            printf("%u,%lf,%lf,%lf,%lf,%lf,%lf \n",
+            printf("ThreadID: %d - %u,%lf,%lf,%lf,%lf,%lf,%lf \n",
+                myId,
                 i,
                 positions[i*3],
                 positions[i*3+1],
@@ -211,48 +215,42 @@ void propagation(double *positions, double *velocities, uint ents_sz, double dt)
                 velocities[i*3+2]
                 );
     }
-    printf("DEBUG: delta: %f, #ents: %u\n", dt, ents_sz);
-    extern __shared__ double4 positionShared[];
-    int iteration;
-    double4 *g_positions;
-    double3 *g_velocities;
-    double3 r_vector; // Spostato da sotto - lo alloco una sola volta
-    double3 a_g;
-    int myID;
-    double3 myBodyPos;
 
-    g_positions = (double4 *) positions;
-    g_velocities = (double3 *) velocities;
-    a_g = {0.0, 0.0, 0.0};
-    myID = blockIdx.x * blockDim.x + threadIdx.x;
-
-    //myBodyPos = g_positions[myID]; //Testare questa double4 vs quella sotto
-    myBodyPos = {g_positions[myID].x, g_positions[myID].y, g_positions[myID].z}; // Mi tengo le mie posizioni per non accedere alla memoriaglobale
+    if (myId < ents_sz) {
+        //myBodyPos = gPositions[myId]; //Testare questa double4 vs quella sotto
+        myBodyPos = {gPositions[myId].x, gPositions[myId].y, gPositions[myId].z}; // Mi tengo le mie posizioni per non accedere alla memoriaglobale
+    }
 
     //for (size_t m2_idx = 0; m2_idx < ents_sz; m2_idx++) {
-    for (int i = 0, iteration = 0; i < ents_sz; i += blockDim.x, iteration++) {
-        // TODO: verifica che il thread possa assegnarsi un corpo
-        positionShared[threadIdx.x] = g_positions[threadIdx.x + blockDim.x * iteration];
+    for (i = 0, iteration = 0; i < ents_sz; i += blockDim.x, iteration++) {
+        // Ogni thread carica un corpo nella shared memory
+        firstPos = blockDim.x * iteration;
+        if (firstPos + threadIdx.x < ents_sz){
+            shPositions[threadIdx.x] = gPositions[firstPos + threadIdx.x];
+            printf("Thread %d loaded: posX: %f, posY %f, posZ %f, mass: %f\n",
+                myId,
+                shPositions[threadIdx.x].x, shPositions[threadIdx.x].y, shPositions[threadIdx.x].z, shPositions[threadIdx.x].w);
+        }
         __syncthreads(); // Mi assicuro che tutti i thread carichino un corpo
-        for (int j = 0; j < blockDim.x; j++){
+        for (int j = 0; j < blockDim.x && firstPos+j < ents_sz; j++){
             if (threadIdx.x != j) {
 
-//            r_vector.x = positions[myID*3  ] - positions[m2_idx*3  ];
-//            r_vector.y = positions[myID*3+1] - positions[m2_idx*3+1];
-//            r_vector.z = positions[myID*3+2] - positions[m2_idx*3+2];
+//            r_vector.x = positions[myId*3  ] - positions[m2_idx*3  ];
+//            r_vector.y = positions[myId*3+1] - positions[m2_idx*3+1];
+//            r_vector.z = positions[myId*3+2] - positions[m2_idx*3+2];
 
-                r_vector.x = myBodyPos.x - positionShared[j].x;
-                r_vector.y = myBodyPos.y - positionShared[j].y;
-                r_vector.z = myBodyPos.z - positionShared[j].z;
+                r_vector.x = myBodyPos.x - shPositions[j].x;
+                r_vector.y = myBodyPos.y - shPositions[j].y;
+                r_vector.z = myBodyPos.z - shPositions[j].z;
 
-                printf("DEBUG: Rvector: x: %f, y: %f, z: %f\n", r_vector.x, r_vector.y, r_vector.x);
+                printf("DEBUG: Thread id: %d, Rvector: x: %f, y: %f, z: %f\n", myId, r_vector.x, r_vector.y, r_vector.x);
 
                 // distanza tra i due corpi
                 double r_mag = sqrt(r_vector.x * r_vector.x + r_vector.y * r_vector.y + r_vector.z * r_vector.z);
                 //double pow_R_mag = pow(r_mag, 2.0);
                 double pow_R_mag = r_mag * r_mag;
-                double acceleration = -1.0 * BIG_G * positionShared[j].w / pow_R_mag;
-                printf("DEBUG: BIG G: %f, masses m2: %f\n", BIG_G, positionShared[j].w);
+                double acceleration = -1.0 * BIG_G * shPositions[j].w / pow_R_mag;
+                printf("DEBUG: BIG G: %f, masses m2: %f\n", BIG_G, shPositions[j].w);
                 printf("DEBUG: Pow_R_mag: %f, R_mag: %f, Acc: %f\n", pow_R_mag, r_mag, acceleration);
 
                 r_vector.x = r_vector.x / r_mag; // Uso la stessa variabile invece di una nuova
@@ -269,44 +267,45 @@ void propagation(double *positions, double *velocities, uint ents_sz, double dt)
     }
     __syncthreads();
 
-    g_velocities[myID].x += a_g.x * dt;
-    g_velocities[myID].y += a_g.y * dt;
-    g_velocities[myID].z += a_g.z * dt;
+    gVelocities[myId].x += a_g.x * dt;
+    gVelocities[myId].y += a_g.y * dt;
+    gVelocities[myId].z += a_g.z * dt;
 
 
-    printf("DEBUG: Update g_velocities, end kernel: %f, %f, %f\n", g_velocities[myID].x, g_velocities[myID].y, g_velocities[myID].z);
+    printf("DEBUG: Update gVelocities, end kernel: %f, %f, %f\n", gVelocities[myId].x, gVelocities[myId].y, gVelocities[myId].z);
 }
 
 __global__
 void update_positions(double *positions, double *velocities, uint ents_sz, double dt) {
     printf("DEBUG: Into Kernel for updating new position\n");
-    int myID;
+    int myId;
 
-    myID = blockIdx.x * blockDim.x + threadIdx.x;
+    myId = blockIdx.x * blockDim.x + threadIdx.x;
 
-        positions[myID*4    ] += velocities[myID*3    ] * dt;
-        positions[myID*4 + 1] += velocities[myID*3 + 1] * dt;
-        positions[myID*4 + 2] += velocities[myID*3 + 2] * dt;
-        printf("%lu,%lf,%lf,%lf,%lf,%lf,%lf\n",
-            (unsigned long) myID,
-            positions[myID*3    ],
-            positions[myID*3 + 1],
-            positions[myID*3 + 2],
-            velocities[myID*3    ],
-            velocities[myID*3 + 1],
-            velocities[myID*3 + 2]
-            );
+    positions[myId*4    ] += velocities[myId*3    ] * dt;
+    positions[myId*4 + 1] += velocities[myId*3 + 1] * dt;
+    positions[myId*4 + 2] += velocities[myId*3 + 2] * dt;
+    printf("%lu,%lf,%lf,%lf,%lf,%lf,%lf\n",
+        (unsigned long) myId,
+        positions[myId*3    ],
+        positions[myId*3 + 1],
+        positions[myId*3 + 2],
+        velocities[myId*3    ],
+        velocities[myId*3 + 1],
+        velocities[myId*3 + 2]
+        );
+// Se tutto funziona poi testare la parte sotto da sostituire con quella sopra
+    /*
+    double4 *gPositions;
+    double3 *gVelocities;
+    gPositions = (double4 *) positions;
+    gVelocities = (double3 *) velocities;
+    myId = blockIdx.x * blockDim.x + threadIdx.x;
 
-//    double4 *g_positions;
-//    double3 *g_velocities;
-//    g_positions = (double4 *) positions;
-//    g_velocities = (double3 *) velocities;
-//    myID = blockIdx.x * blockDim.x + threadIdx.x;
-//
-//    g_positions[myID].x += g_velocities[myID].x * dt;
-//    g_positions[myID].y += g_velocities[myID].y * dt;
-//    g_positions[myID].z += g_velocities[myID].z * dt;
-
+    gPositions[myId].x += gVelocities[myId].x * dt;
+    gPositions[myId].y += gVelocities[myId].y * dt;
+    gPositions[myId].z += gVelocities[myId].z * dt;
+    */
 }
 
 __host__
@@ -314,9 +313,9 @@ void write_positions(double *positions, double *velocities, uint ents_sz, FILE *
     for (size_t entity_idx = 0; entity_idx < ents_sz; entity_idx++) {
         fprintf(fpt,  "%lu,%lf,%lf,%lf,%lf,%lf,%lf\n",
             entity_idx,
-            positions[entity_idx*3    ],
-            positions[entity_idx*3 + 1],
-            positions[entity_idx*3 + 2],
+            positions[entity_idx*4    ],
+            positions[entity_idx*4 + 1],
+            positions[entity_idx*4 + 2],
             velocities[entity_idx*3    ],
             velocities[entity_idx*3 + 1],
             velocities[entity_idx*3 + 2]
