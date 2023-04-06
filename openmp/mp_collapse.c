@@ -113,6 +113,12 @@ void get_entities(char filename[], Entity **ents, uint *n_ents) {
     fclose(file);
 }
 
+void update_partial_result(RVec3 *a_g, double acceleration, RVec3 r_unit_vector){
+    a_g->x += acceleration * r_unit_vector.x;
+    a_g->y += acceleration * r_unit_vector.y;
+    a_g->z += acceleration * r_unit_vector.z;
+}
+
 void propagation(Entity ents[], uint ents_sz, size_t t_start, size_t t_end, size_t dt, const char *output) {
     FILE *fpt;
     RVec3 *a_g;
@@ -123,20 +129,18 @@ void propagation(Entity ents[], uint ents_sz, size_t t_start, size_t t_end, size
 //                    ents[i].vel.x,ents[i].vel.y, ents[i].vel.z);
 //    }
 
-	a_g = calloc(ents_sz, sizeof(RVec3)); // Fare malloc e poi far azzerare ai thread?
+	a_g = malloc(ents_sz * sizeof(RVec3)); // Fare malloc e poi far azzerare ai thread?
     if (a_g == NULL){
         fprintf(stderr, "Error during memory allocation into propagation function\n");
         exit(2);
     }
 
-	locks = calloc(ents_sz, sizeof(omp_lock_t)); // Fare malloc e poi far azzerare ai thread?
+	locks = malloc(ents_sz * sizeof(omp_lock_t)); // Fare malloc e poi far azzerare ai thread?
     if (a_g == NULL){
         fprintf(stderr, "Error during memory allocation into propagation function\n");
         exit(2);
     }
 
-
-#   pragma omp parallel num_threads(thread_count) // Initialize locks
     for (size_t m1_idx = 0; m1_idx < ents_sz; m1_idx++) {
         omp_init_lock(&locks[m1_idx]);
     }
@@ -171,16 +175,18 @@ void propagation(Entity ents[], uint ents_sz, size_t t_start, size_t t_end, size
 
                     RVec3 r_unit_vector = {r_vector.x / r_mag, r_vector.y / r_mag, r_vector.z / r_mag};
 
-                    omp_set_lock(&locks[m1_idx]);
-                    a_g[m1_idx].x += acceleration * r_unit_vector.x;
-                    a_g[m1_idx].y += acceleration * r_unit_vector.y;
-                    a_g[m1_idx].z += acceleration * r_unit_vector.z;
-                    omp_unset_lock(&locks[m1_idx]);
+                    /* omp_set_lock(&locks[m1_idx]); */
+                    /* a_g[m1_idx].x += acceleration * r_unit_vector.x; */
+                    /* a_g[m1_idx].y += acceleration * r_unit_vector.y; */
+                    /* a_g[m1_idx].z += acceleration * r_unit_vector.z; */
+                    /* omp_unset_lock(&locks[m1_idx]); */
+
+# pragma omp critical
+                    update_partial_result(&a_g[m1_idx], acceleration, r_unit_vector);
                 }
             }
         }
         /* printf("Sono il thread: %d\n", omp_get_thread_num()); */
-
 #       pragma omp parallel for
         for (size_t entity_idx = 0; entity_idx < ents_sz; entity_idx++) {
             ents[entity_idx].vel.x += a_g[entity_idx].x * dt;
@@ -198,7 +204,6 @@ void propagation(Entity ents[], uint ents_sz, size_t t_start, size_t t_end, size
         }
     }
 
-#   pragma omp parallel num_threads(thread_count)
     for (size_t m1_idx = 0; m1_idx < ents_sz; m1_idx++) {
         omp_destroy_lock(&locks[m1_idx]);
     }
