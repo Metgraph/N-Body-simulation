@@ -25,9 +25,9 @@ typedef struct
 // use int instead of uint for indexs so -1 can be used as a sort of null value
 typedef struct
 {
-    uint ents; // entities in this section
-    double mass;
-    RVec3 center;    // mass center
+    uint ents; // entities in this section (numero figli del nodo - da controllare)
+    double mass; //massa dei figli
+    RVec3 center;    // mass center media ponderata in base alla massa
     int parent;      // index of parent
     int children[8]; // indexs of children
 } Octnode;
@@ -38,7 +38,7 @@ typedef struct
     int sz;        // number of total slot in array
     int firstfree; // first location free
     int root;
-    double max;
+    double max; //dal centro, l'asse più distante
     Octnode *nodes;
 } Octtree;
 
@@ -137,7 +137,7 @@ double get_distance(RVec3 *r1, RVec3 *r2)
     return sqrt(pow(r1->x - r2->x, 2) + pow(r1->y - r2->y, 2) + pow(r1->z - r2->z, 2));
 }
 
-Octnode *allocate_node(int parent)
+Octnode *allocate_node(int parent) //non si usa più
 {
     Octnode *ret;
     // alloc and initialize all to 0 (and then NULL)
@@ -146,7 +146,7 @@ Octnode *allocate_node(int parent)
     return ret;
 }
 
-void update_max(double *max, RVec3 *val)
+void update_max(double *max, RVec3 *val) //calcolo della distanza degli assi
 {
     // update max
     *max = fabs(val->x) > *max ? fabs(val->x) : *max;
@@ -156,7 +156,7 @@ void update_max(double *max, RVec3 *val)
 
 void default_max(double *max)
 {
-    *max = DBL_MIN;
+    *max = DBL_MIN; // Cosa è dbl_min? dove lo prende?
 }
 
 // get the index of branch where body will be placed.
@@ -372,7 +372,7 @@ void init_tree(Entity ents[], int ents_sz, Octtree *tree)
     tree->sz = sz;
     tree->root = ents_sz;
     tree->nodes = malloc(sz * sizeof(Octnode));
-
+    // TODO: sostituire coni init node
     Octnode root;
     root.center.x = 0;
     root.center.y = 0;
@@ -413,7 +413,7 @@ void calculate_acceleration(Octnode *ent, Octnode *node, RVec3 *acc)
     acc->z += acceleration * r_unit_vector.z;
 }
 
-//calculate body acceleration
+//calculate body acceleration - TODO: trasformare in iterativo
 void get_acceleration_rec(Octtree *tree, int node_indx, int id, RVec3 *acc, double border)
 {
     double distance;
