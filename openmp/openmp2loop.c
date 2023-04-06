@@ -130,7 +130,7 @@ void propagation(Entity ents[], uint ents_sz, size_t t_start, size_t t_end, size
 
 		for (size_t entity_idx = 0; entity_idx < ents_sz; entity_idx++)
 		{
-			fprintf(fpt, "%u,%lf,%lf,%lf,%lf,%lf,%lf \n", entity_idx, ents[entity_idx].pos.x,
+			fprintf(fpt, "%lu,%lf,%lf,%lf,%lf,%lf,%lf\n", entity_idx, ents[entity_idx].pos.x,
 					ents[entity_idx].pos.y, ents[entity_idx].pos.z, ents[entity_idx].vel.x, ents[entity_idx].vel.y,
 					ents[entity_idx].vel.z);
 		}
