@@ -65,6 +65,7 @@ void count_entities_file(char *filename, uint *n){
         fprintf(stderr, "No bodies found into file. Closing\n");
         exit(1);
     } else {
+        // For prevent files that do not have a newline character at the end
         (*n)++;
     }
 }
@@ -123,7 +124,6 @@ void propagation(Entity ents[], uint ents_sz, size_t t_start, size_t t_end, size
                     r_vector.x = ents[m1_idx].pos.x - ents[m2_idx].pos.x;
                     r_vector.y = ents[m1_idx].pos.y - ents[m2_idx].pos.y;
                     r_vector.z = ents[m1_idx].pos.z - ents[m2_idx].pos.z;
-
                     //distanza tra i due corpi
                     double r_mag = sqrt(r_vector.x * r_vector.x + r_vector.y * r_vector.y + r_vector.z * r_vector.z);
 
@@ -148,8 +148,9 @@ void propagation(Entity ents[], uint ents_sz, size_t t_start, size_t t_end, size
             ents[entity_idx].pos.y += ents[entity_idx].vel.y * dt;
             ents[entity_idx].pos.z += ents[entity_idx].vel.z * dt;
 
-            fprintf(fpt, "%u,%lf,%lf,%lf,%lf,%lf,%lf \n", entity_idx, ents[entity_idx].pos.x,
-            ents[entity_idx].pos.y, ents[entity_idx].pos.z, ents[entity_idx].vel.x,ents[entity_idx].vel.y, ents[entity_idx].vel.z);
+            fprintf(fpt, "%lu,%lf,%lf,%lf,%lf,%lf,%lf\n", entity_idx,
+                    ents[entity_idx].pos.x, ents[entity_idx].pos.y, ents[entity_idx].pos.z,
+                    ents[entity_idx].vel.x,ents[entity_idx].vel.y, ents[entity_idx].vel.z);
         }
         // t += dt;
     }
