@@ -325,7 +325,7 @@ __global__ void get_bounding_box(double *g_idata, int ents_sz, double *g_odata)
     double v1, v2;
     // if thread are more than values give them a 0 value
     // the first if has no divergence, becuase threads have same ents_sz value
-    if (i < ents_sz * 3)
+    if (i < ents_sz)
     {
         v1 = fabs(g_idata[i]);
         if (i + space < ents_sz)
@@ -941,25 +941,24 @@ int main(int argc, char *argv[])
     Octtree h_tree_cpy, *d_tree;
     size_t start, end, dt;
     cache_sz = 0;
-    // if (argc < 6 || argc > 7)
-    // {
-    //     fprintf(stderr, "Usage: %s input_filename start_time end_time delta_time output_filename [cache_sz_MB]\n", argv[0]);
-    //     return 1;
-    // }
+    if (argc < 6 || argc > 7)
+    {
+        fprintf(stderr, "Usage: %s input_filename start_time end_time delta_time output_filename [cache_sz_MB]\n", argv[0]);
+        return 1;
+    }
 
-    // n_ents = get_entities(argv[1], &h_ents_struct);
-    // start = strtoul(argv[2], NULL, 10);
-    // end = strtoul(argv[3], NULL, 10);
-    // dt = strtoul(argv[4], NULL, 10);
-    // if (argc == 7)
-    // {
-    //     cache_sz = strtoul(argv[6], NULL, 10);
-    // }
-    //stop at 1056
-    n_ents = get_entities("/home/prop/Documents/multicore/N-Body-simulation/tests/2000_bodies.csv", &h_ents_struct);
-    start = 0;
-    dt = 1;
-    end = dt * 20;
+    n_ents = get_entities(argv[1], &h_ents_struct);
+    start = strtoul(argv[2], NULL, 10);
+    end = strtoul(argv[3], NULL, 10);
+    dt = strtoul(argv[4], NULL, 10);
+    if (argc == 7)
+    {
+        cache_sz = strtoul(argv[6], NULL, 10);
+    }
+    // n_ents = get_entities("/home/prop/Documents/multicore/N-Body-simulation/tests/2000_bodies.csv", &h_ents_struct);
+    // start = 0;
+    // dt = 1;
+    // end = dt * 20;
 
     cudaGetDeviceProperties(&cuda_prop, 0);
 
@@ -985,22 +984,11 @@ int main(int argc, char *argv[])
     cuda_err = cudaMalloc(&d_emass, sizeof(double) * n_ents);
     check_error(cuda_err);
 
-    if (n_ents > 1024 * 2)
-    {
-        cuda_err = cudaMalloc(&d_reduce1, sizeof(double) * ((n_ents * 3 - 1) / 1024 + 1));
-        check_error(cuda_err);
-    }
-    else
-    {
-        // the final destination of result is the tree attribute max
-        // need to be defined also here because first reduction is out of the loop (if loop will be executed, the program will not enter this branch)
-        d_reduce1 = &d_tree->max;
-    }
-    if (n_ents > 1024 * 2 * 1024 * 2)
-    {
-        cuda_err = cudaMalloc(&d_reduce2, sizeof(double) * ((n_ents * 3 - 1) / 1024 / 1024 + 1));
-        check_error(cuda_err);
-    }
+    //TODO can be optimized, read first time directly on position time
+    cuda_err = cudaMalloc(&d_reduce1, sizeof(double) * (n_ents * 3));
+    check_error(cuda_err);
+    cuda_err = cudaMalloc(&d_reduce2, sizeof(double) * ((n_ents * 3 - 1) / 1024 + 1));
+    check_error(cuda_err);
 
     cuda_err = cudaMemGetInfo(&free_mem, &total_mem);
     check_error(cuda_err);
@@ -1056,43 +1044,42 @@ int main(int argc, char *argv[])
     // TODO recalculate thread and block size
     int max_threads = cuda_prop.maxThreadsPerBlock;
     printf("Initialization completed\n");
-    // FILE *fpt = fopen(argv[5], "w");
-    FILE *fpt = fopen("/home/prop/Documents/multicore/N-Body-simulation/tests/output/cuda_barn.csv", "w");
+    FILE *fpt = fopen(argv[5], "w");
+    // FILE *fpt = fopen("/home/prop/Documents/multicore/N-Body-simulation/tests/output/cuda_barn.csv", "w");
     for (size_t t = start; t < end; t += dt)
     {
+        #ifdef STEP_PRINT
+        printf("%lu\n", t);
+        #endif
         double *d_reduce_in, *d_reduce_out, *temp_swap;
         block.x = cuda_prop.warpSize;
         block.y = 7;
+        #ifdef STEP_PRINT
+        printf("SET TREE\n");
+        #endif
         set_tree<<<1, block>>>(d_tree);
         cuda_err = cudaDeviceSynchronize();
         check_error(cuda_err);
-        get_bounding_box<<<(n_ents - 1) / (max_threads * 2) + 1, max_threads, max_threads * sizeof(double)>>>(d_epos, n_ents, d_reduce1);
-        cuda_err = cudaDeviceSynchronize();
-        check_error(cuda_err);
-        d_reduce_in = d_reduce2;
-        d_reduce_out = d_reduce1;
-        // TODO check if num of blocks are correct
-        for (int temp_sz = (n_ents - 1) / (max_threads * 2) + 1; temp_sz > 1; temp_sz = (temp_sz - 1) / (max_threads * 2) + 1)
-        {
-            if (temp_sz <= max_threads * 2)
-            {
-                temp_swap = d_reduce_in;
-                d_reduce_in = d_reduce_out;
-                d_reduce_out = temp_swap;
-            }
-            else
-            {
-                d_reduce_in = d_reduce_out;
-                // the final destination of result is the tree attribute max
-                d_reduce_out = &d_tree->max;
-            }
-            // uses 12 registers
-            get_bounding_box<<<(temp_sz - 1) / (max_threads * 2) + 1, max_threads, max_threads * sizeof(double)>>>(d_reduce_in, temp_sz, d_reduce_out);
+        d_reduce_in = d_reduce1;
+        d_reduce_out = d_reduce2;
+        #ifdef STEP_PRINT
+        printf("BOUNDING BOX\n");
+        #endif
+        cudaMemcpy(d_reduce_in, d_epos, sizeof(double)*n_ents*3, cudaMemcpyDeviceToDevice);
+        for(int i=n_ents*3; i>1;i=((i-1)/2048+1)){
+            get_bounding_box<<<(i-1)/2048+1, max_threads, max_threads * sizeof(double)>>>(d_reduce_in, i, d_reduce_out);
             cuda_err = cudaDeviceSynchronize();
             check_error(cuda_err);
+            double *temp=d_reduce_out;
+            d_reduce_out=d_reduce_in;
+            d_reduce_in=temp;
         }
+        cudaMemcpy(&d_tree->max, d_reduce_in, sizeof(double), cudaMemcpyDeviceToDevice);
         get_opt_grid(&cuda_prop, n_ents, 56, &opt_block, &opt_thread);
         // uses 56 registers
+        #ifdef STEP_PRINT
+        printf("ADD ENT\n");
+        #endif
         add_ent<<<opt_block, opt_thread>>>(d_tree, d_ents_struct, n_ents);
         // add_ent<<<1, 128>>>(d_tree, d_ents_struct, n_ents);
         cuda_err = cudaDeviceSynchronize();
@@ -1101,6 +1088,9 @@ int main(int argc, char *argv[])
 
         get_opt_grid(&cuda_prop, 0, 62, &opt_block, &opt_thread);
         // uses 62 registers
+        #ifdef STEP_PRINT
+        printf("SET BRANCH VALUE\n");
+        #endif
         set_branch_values<<<opt_block, opt_thread>>>(d_tree);
         // set_branch_values<<<1, 10>>>(d_tree);
         cuda_err = cudaDeviceSynchronize();
@@ -1109,6 +1099,9 @@ int main(int argc, char *argv[])
         // maybe the max threads could be n_ents or some fraction like n_ents/2
         get_opt_grid(&cuda_prop, 0, 16, &opt_block, &opt_thread);
         // uses 16 registers
+        #ifdef STEP_PRINT
+        printf("ORDER ENTS\n");
+        #endif
         order_ents<<<opt_block, opt_thread>>>(d_tree, d_sorted_nodes);
         cuda_err = cudaDeviceSynchronize();
         check_error(cuda_err);
@@ -1117,12 +1110,18 @@ int main(int argc, char *argv[])
         // uses 6 registers
         block.x = cuda_prop.warpSize;
         block.y = opt_thread / cuda_prop.warpSize;
-        printf("%lu\n", t);
+        
+        #ifdef STEP_PRINT
+        printf("GET ACCELERATION\n");
+        #endif
         get_acceleration2<<<opt_block, block, cuda_prop.sharedMemPerBlock / cuda_prop.maxBlocksPerMultiProcessor>>>(d_tree, d_ents_struct, n_ents, dt, cuda_prop.sharedMemPerBlock);
         cuda_err = cudaDeviceSynchronize();
         check_error(cuda_err);
         cudaMemcpy(h_level, d_evel, sizeof(double) * n_ents * 3, cudaMemcpyDeviceToHost);
         cudaMemcpy(h_lepos, d_epos, sizeof(double) * n_ents * 3, cudaMemcpyDeviceToHost);
+        #ifdef STEP_PRINT
+        printf("PRINT\n");
+        #endif
         print_values(h_lepos, h_level, n_ents, fpt);
     }
 
@@ -1142,12 +1141,6 @@ int main(int argc, char *argv[])
     cudaFree(d_sorted_nodes);
     cudaFree(d_depth);
     cudaFree(d_shift);
-    if (n_ents > 1024 * 2)
-    {
-        cudaFree(d_reduce1);
-    }
-    if (n_ents > 1024 * 2 * 1024 * 2)
-    {
-        cudaFree(d_reduce2);
-    }
+    cudaFree(d_reduce1);
+    cudaFree(d_reduce2);
 }
