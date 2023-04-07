@@ -4,3 +4,4 @@ build/
 tests/output.csv
 tests/output/
 main.py
+tests/1000000_bodies.csv
