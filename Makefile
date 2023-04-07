@@ -5,9 +5,9 @@ COMPILER ?= gcc
 .PHONY: all clean
 
 exhaustive: 
-	${COMPILER} -o ${BUILD_DIR}/exhaustive serial/exhaustive.c -lm
-	${COMPILER} -o ${BUILD_DIR}/openmp1loop openmp/openmp1loop.c -lm -fopenmp
-	${COMPILER} -o ${BUILD_DIR}/openmp2loop openmp/openmp2loop.c -lm -fopenmp
+	${COMPILER} -O2 -o ${BUILD_DIR}/exhaustive serial/exhaustive.c -lm
+	${COMPILER} -O2 -o ${BUILD_DIR}/openmp1loop openmp/openmp1loop.c -lm -fopenmp
+	${COMPILER} -O2 -o ${BUILD_DIR}/openmp2loop openmp/openmp2loop.c -lm -fopenmp
 
 debug:
 	${COMPILER} -g -o ${BUILD_DIR}/exhaustive serial/exhaustive.c -lm
@@ -15,7 +15,7 @@ debug:
 	${COMPILER} -g -o ${BUILD_DIR}/openmp2loop openmp/openmp2loop.c -lm -fopenmp
 
 barneshut:
-	${COMPILER} -g -o ${BUILD_DIR}/barnes-hut serial/barnes-hut.c -lm
+	${COMPILER} -O2 -o ${BUILD_DIR}/barnes-hut serial/barnes-hut.c -lm
 
 clean:
 	rm -rf build/*
