@@ -23,16 +23,16 @@ manualcollapsedebug:
 	${COMPILER} -Wall -g -o ${BUILD_DIR}/manual_collapse_d openmp/manual_collapse.c -lm -fopenmp
 
 collapse:
-	${COMPILER} -Wall -o ${BUILD_DIR}/collapse openmp/mp_collapse.c -lm -fopenmp
+	${COMPILER} -Wall -o ${BUILD_DIR}/collapse openmp/collapse.c -lm -fopenmp
 
 collapsedebug:
-	${COMPILER} -Wall -g -o ${BUILD_DIR}/collapse_d openmp/mp_collapse.c -lm -fopenmp
+	${COMPILER} -Wall -g -o ${BUILD_DIR}/collapse_d openmp/collapse.c -lm -fopenmp
 
 parallelfor:
-	${COMPILER} -Wall -o ${BUILD_DIR}/parallel_for openmp/mp_parallel_for.c -lm -fopenmp
+	${COMPILER} -Wall -o ${BUILD_DIR}/parallel_for openmp/parallel_for.c -lm -fopenmp
 
 parallelfordebug:
-	${COMPILER} -Wall -g -o ${BUILD_DIR}/parallel_for_d openmp/mp_parallel_for.c -lm -fopenmp
+	${COMPILER} -Wall -g -o ${BUILD_DIR}/parallel_for_d openmp/parallel_for.c -lm -fopenmp
 
 barneshut:
 	${COMPILER} -Wall -g -o ${BUILD_DIR}/barnes-hut serial/barnes-hut.c -lm
