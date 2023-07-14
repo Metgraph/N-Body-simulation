@@ -29,9 +29,9 @@ The _Makefile_ contains all the targets for compiling all the source code.
 ...
 
 ### Code Formatting
-[Clang-format](https://clang.llvm.org/docs/ClangFormat.html) for c code.
+[Clang-format](https://clang.llvm.org/docs/ClangFormat.html) for c code.\
 [Black](https://github.com/psf/black) for python code.
 
 
-##Perfomance analisys
+## Perfomance analisys
 ...
