@@ -13,7 +13,7 @@ The first one, called exhaustive, computes the positions at time t+1 by calculat
 
 The second algorithm... continue...
 
-##Source code
+## Source code
 In the __serial__ folder, you will find the implementations of the two algorithms in a serial manner.
 
 In the __openmp__ folder, you will find the parallelized versions using the OpenMP library.
@@ -25,7 +25,7 @@ In the __utils__ folder, you will find supporting Python codes such as the one f
 ### Compiling
 The _Makefile_ contains all the targets for compiling all the source code.
 
-## Run The Code
+### Run The Code
 ...
 
 ### Code Formatting
