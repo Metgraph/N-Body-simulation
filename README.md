@@ -9,7 +9,7 @@ N-body simulation is often used in various scientific fields such as astronomy, 
 From a computational perspective, the simulation can require significant computational effort when many bodies are involved because they need to interact with all the other bodies present in the system.
 
 We present the solution to the problem using two types of algorithms.
-The first one, called exhaustive, computes the positions at time t+1 by calculating the interaction of each individual body with all others present in the system with time complexity $$O(n^2)$$.
+The first one, called exhaustive, computes the positions at time t+1 by calculating the interaction of each individual body with all others present in the system with time complexity $O(n^2)$.
 
 The second algorithm... continue...
 
@@ -24,6 +24,9 @@ In the __utils__ folder, you will find supporting Python codes such as the one f
 
 ### Compiling
 The _Makefile_ contains all the targets for compiling all the source code.
+
+## Run The Code
+...
 
 ### Code Formatting
 [Clang-format](https://clang.llvm.org/docs/ClangFormat.html) for c code.
