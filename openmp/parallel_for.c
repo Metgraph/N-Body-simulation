@@ -143,10 +143,14 @@ void acceleration(uint ents_sz, Entity *ents, RVec3 *acc) {
 #   pragma omp for
     for (size_t m1 = 0; m1 < ents_sz; m1++) {
         /* printf("Thread %d calculate m: %lu\n", omp_get_thread_num(), m1); */
+        // Per false sharing: acc è condivisa tra tutti i thread allora
+        // decido di scriverci una sola volta per thread solo alla
+        // fine dei calcoli
+        RVec3 local_acc;
 
-        acc[m1].x = 0;
-        acc[m1].y = 0;
-        acc[m1].z = 0;
+        local_acc.x = 0;
+        local_acc.y = 0;
+        local_acc.z = 0;
 
         for (size_t m2 = 0; m2 < ents_sz; m2++) {
             RVec3 r_vector;
@@ -159,10 +163,13 @@ void acceleration(uint ents_sz, Entity *ents, RVec3 *acc) {
                             r_vector.z * r_vector.z + 0.01;
             inv_r3 = pow(inv_r3, -1.5);
 
-            acc[m1].x += BIG_G * r_vector.x * inv_r3 * ents[m2].mass;
-            acc[m1].y += BIG_G * r_vector.y * inv_r3 * ents[m2].mass;
-            acc[m1].z += BIG_G * r_vector.z * inv_r3 * ents[m2].mass;
+            local_acc.x += BIG_G * r_vector.x * inv_r3 * ents[m2].mass;
+            local_acc.y += BIG_G * r_vector.y * inv_r3 * ents[m2].mass;
+            local_acc.z += BIG_G * r_vector.z * inv_r3 * ents[m2].mass;
         }
+        acc[m1].x = local_acc.x;
+        acc[m1].y = local_acc.y;
+        acc[m1].z = local_acc.z;
     }
 }
 
