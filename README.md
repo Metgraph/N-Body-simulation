@@ -32,15 +32,12 @@ The _Makefile_ contains all the targets for compiling all the source code.
 [Clang-format](https://clang.llvm.org/docs/ClangFormat.html) for c code (rules are in the root).\
 [Black](https://github.com/psf/black) for python code.
 
-## video
+## Video
 To display the output of a result graphically, you can use the command
-``````````````````````````````
 ```
 $ make play=<file name>
 ```
-
 or
-
 ```
 $ python utils/pygame-show.py <file name>
 ```
