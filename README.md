@@ -34,12 +34,12 @@ The _Makefile_ contains all the targets for compiling all the source code.
 
 ## Video
 To display the output of a result graphically, you can use the command
-```
-$ make play=<file name>
+```sh
+make play=<file name>
 ```
 or
-```
-$ python utils/pygame-show.py <file name>
+```sh
+python utils/pygame-show.py <file name>
 ```
 
 ## Perfomance analisys
