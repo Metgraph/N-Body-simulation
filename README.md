@@ -38,7 +38,9 @@ To display the output of a result graphically, you can use the command
 ```
 $ make play=<file name>
 ```
+
 or
+
 ```
 $ python utils/pygame-show.py <file name>
 ```
