@@ -35,7 +35,7 @@ The _Makefile_ contains all the targets for compiling all the source code.
 ## Video
 To display the output of a result graphically, you can use the command
 ```sh
-make play=<file name>
+make play FILE=<file name>
 ```
 or
 ```sh
@@ -44,3 +44,7 @@ python utils/pygame-show.py <file name>
 
 ## Perfomance analisys
 ...
+
+## TODO
+- [ ] Test cache miss performance: perf stat -d <./..>
+- [ ] Video
