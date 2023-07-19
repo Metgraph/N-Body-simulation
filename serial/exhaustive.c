@@ -181,31 +181,31 @@ void propagation(Entity *ents, uint ents_sz, int n_steps, float dt,
     fpt = fopen(output, "w");
 
     // Print to file initial state
-    for (size_t entity_idx = 0; entity_idx < ents_sz; entity_idx++) {
-        fprintf(fpt, "%lu,%lf,%lf,%lf,%lf\n", entity_idx,
-                ents[entity_idx].pos.x, ents[entity_idx].pos.y,
-                ents[entity_idx].pos.z, ents[entity_idx].mass);
+    for (size_t i = 0; i < ents_sz; i++) {
+        fprintf(fpt, "%lu,%lf,%lf,%lf,%lf\n", i,
+                ents[i].pos.x, ents[i].pos.y,
+                ents[i].pos.z, ents[i].mass);
     }
 
     for (int t = 0; t < n_steps; t++) {
 
         // First 1/2 kick
-        for (size_t m1 = 0; m1 < ents_sz; m1++) {
-            ents[m1].vel.x += acc[m1].x * dt / 2.0;
-            ents[m1].vel.y += acc[m1].y * dt / 2.0;
-            ents[m1].vel.z += acc[m1].z * dt / 2.0;
+        for (size_t i = 0; i < ents_sz; i++) {
+            ents[i].vel.x += acc[i].x * dt / 2.0;
+            ents[i].vel.y += acc[i].y * dt / 2.0;
+            ents[i].vel.z += acc[i].z * dt / 2.0;
         }
 
         // Move bodies
-        for (size_t entity_idx = 0; entity_idx < ents_sz; entity_idx++) {
-            ents[entity_idx].pos.x += ents[entity_idx].vel.x * dt;
-            ents[entity_idx].pos.y += ents[entity_idx].vel.y * dt;
-            ents[entity_idx].pos.z += ents[entity_idx].vel.z * dt;
+        for (size_t i = 0; i < ents_sz; i++) {
+            ents[i].pos.x += ents[i].vel.x * dt;
+            ents[i].pos.y += ents[i].vel.y * dt;
+            ents[i].pos.z += ents[i].vel.z * dt;
 
             // Save positions
-            fprintf(fpt, "%lu,%lf,%lf,%lf,%lf\n", entity_idx,
-                    ents[entity_idx].pos.x, ents[entity_idx].pos.y,
-                    ents[entity_idx].pos.z, ents[entity_idx].mass);
+            fprintf(fpt, "%lu,%lf,%lf,%lf,%lf\n", i,
+                    ents[i].pos.x, ents[i].pos.y,
+                    ents[i].pos.z, ents[i].mass);
         }
 
         // Update accelerations
