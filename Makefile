@@ -16,6 +16,8 @@ debug:
 
 barneshut:
 	${COMPILER} -g -o ${BUILD_DIR}/barnes-hut serial/barnes-hut.c -lm
+	${COMPILER} -g -o ${BUILD_DIR}/barnes-hut-omp openmp/barnes-hut.c -lm -fopenmp
+
 
 clean:
 	rm -rf build/*
