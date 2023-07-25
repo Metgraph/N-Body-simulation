@@ -11,7 +11,7 @@ endif
 endif
 
 exhaustive:
-	${COMPILER} -Wall -o ${BUILD_DIR}/exhaustive serial/exhaustive.c -lm
+	${COMPILER} -Wall -o ${BUILD_DIR}/exhaustive_s serial/exhaustive.c -lm
 
 exhaustivedebug:
 	${COMPILER} -Wall -g -o ${BUILD_DIR}/exhaustive_d serial/exhaustive.c -lm
@@ -35,9 +35,11 @@ parallelfordebug:
 	${COMPILER} -Wall -g -o ${BUILD_DIR}/parallel_for_d openmp/parallel_for.c -lm -fopenmp
 
 barneshut:
-	${COMPILER} -g -o ${BUILD_DIR}/barnes-hut serial/barnes-hut.c -lm
-	${COMPILER} -g -o ${BUILD_DIR}/barnes-hut-omp openmp/barnes-hut.c -lm -fopenmp
+	${COMPILER} -Wall -g -o ${BUILD_DIR}/barnes-hut serial/barnes-hut.c -lm
+	${COMPILER} -Wall -g -o ${BUILD_DIR}/barnes-hut-omp openmp/barnes-hut.c -lm -fopenmp
 
+play:
+	python3 utils/pygame-show.py $(FILE)
 
 clean:
 	rm -rf build/*
