@@ -452,7 +452,7 @@ void get_bounding_box(Entity ents[], int ents_sz, double *max_val)
         loc_max[id].max = 0.0;
     # pragma omp for
         for (int i = 0; i < ents_sz; i++) {
-            double l_max = 0.0;
+            // double l_max = 0.0;
             loc_max[id].max = fabs(ents[i].pos.x) > loc_max[id].max ? fabs(ents[i].pos.x) : loc_max[id].max;
             loc_max[id].max = fabs(ents[i].pos.y) > loc_max[id].max ? fabs(ents[i].pos.y) : loc_max[id].max;
             loc_max[id].max = fabs(ents[i].pos.z) > loc_max[id].max ? fabs(ents[i].pos.z) : loc_max[id].max;
