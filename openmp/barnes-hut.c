@@ -600,6 +600,7 @@ void propagation(Entity ents[], int ents_sz, int n_steps, float dt, const char *
     FILE *fpt;
     Octtree tree;
     create_tree(ents, ents_sz, &tree);
+    init_node(&tree, 0);
     fpt = fopen(output, "w");
     RVec3 *acc;
 
