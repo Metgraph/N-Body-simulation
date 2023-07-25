@@ -7,6 +7,9 @@
 
 #define BILLION 1000000000.0
 
+#define MUTEX
+
+#define LOCKED -2
 typedef unsigned int uint;
 
 typedef struct
@@ -30,25 +33,30 @@ typedef struct {
     double pad[7];
 } max_v;
 
-
-// use int instead of uint for indexs so -1 can be used as a sort of null value
+// TODO put in a common file
 typedef struct
 {
-    uint ents; // entities in this section (numero figli del nodo - da controllare)
-    double mass; //massa dei figli
-    RVec3 center;    // mass center media ponderata in base alla massa
-    int parent;      // index of parent
-    int children[8]; // indexs of children
+    int ents; // how many ents are in the node
+    double mass;
+    RVec3 center;
+    int children[8]; // must be an array of size 8
+#ifdef MUTEX
+    omp_lock_t writelocks[8];
+#endif
+    int parent;
+    int depth;
+
 } Octnode;
 
-// use int for same reason commented above Octnode and to avoid to get number higher than int max value
 typedef struct
 {
-    int sz;        // number of total slot in array
-    int firstfree; // first location free
+    int firstfree;
     int root;
-    double max; // Root border lenght
+    double max;
     Octnode *nodes;
+    int sz;
+    //useless, but not yet tested with its removal
+    omp_lock_t reallocnodes;
 } Octtree;
 
 //const double BIG_G = 6.67e-11;
@@ -56,7 +64,7 @@ const double BIG_G = 1.0;
 const double THETA = 0.5; // Theta = 0: senza approssimazione
 int thread_count;
 
-// TODO put in a common file
+
 uint get_entities(char filename[], Entity **ents)
 {
     Entity e_buff;
@@ -168,164 +176,241 @@ double get_distance(RVec3 *r1, RVec3 *r2)
 {
     return sqrt(pow(r1->x - r2->x, 2) + pow(r1->y - r2->y, 2) + pow(r1->z - r2->z, 2));
 }
+double border_tree(Octtree *tree) { return tree->max * 2; }
 
-// get the index of branch where body will be placed.
-// Center is the center of volume of branch. It will calculate the center of next branch
-// border_size contains the border size of the current branch volume (so the volume is border_size^3)
-uint get_indx_loc(RVec3 *pos, RVec3 *center, double *border_size)
+void copy_RVec3(RVec3 *dest, RVec3 *src)
+{
+    dest->x = src->x;
+    dest->y = src->y;
+    dest->z = src->z;
+}
+
+int get_indx_loc(RVec3 *pos, RVec3 *center, double *border_size)
 {
     int indx;
     int x, y, z;
+    // used to calculate the new center, it's the new border divided by 2,
+    // equals
     double bord_div4 = *border_size / 4;
-
     z = pos->z >= center->z;
     y = pos->y >= center->y;
     x = pos->x >= center->x;
-
-    indx = z * 4 + y * 2 + x; // Posizione all'interno di uno degli 8 quadranti del cubo
-
-    // Calculate the new center
-    center->x += x ? bord_div4 : -(bord_div4);
+    indx = z * 4 + y * 2 + x;
+    // used to calculate new center
+    center->x +=
+        x ? bord_div4 : -(bord_div4); // double(x)*2*border_size - border_size
     center->y += y ? bord_div4 : -(bord_div4);
     center->z += z ? bord_div4 : -(bord_div4);
-    *border_size /= 2; // Side's size of inner box
+    *border_size /= 2;
 
     return indx;
 }
 
-void double_Octtree(Octtree *tree)
+int simulate_compare_and_swap(int *ptr, int expected, int new_val)
 {
-    tree->sz *= 2;
-    tree->nodes=realloc(tree->nodes, tree->sz*sizeof(Octnode));
+    // int old_val;
+    // #pragma omp atomic capture
+    // {
+    //     old_val = *ptr;
+    //     if (old_val == expected) {
+    //         *ptr = new_val;
+    //     }
+    // }
+    // return old_val;
+    // int s_cap;
+
+    // here we capture the shared variable and also update it if p is larger
+    int ret;
+#pragma omp atomic compare capture
+    {
+        ret = *ptr;
+        // s_cap = s;
+        if (*ptr == expected)
+        {
+            *ptr = new_val;
+        }
+    }
+    return ret;
 }
 
-// Set empty node
-void init_node(Octnode *node)
+//now init_node manages firstfree variable and memory reallocation
+int init_node(Octtree *tree, int depth)
 {
-    node->center.x = 0;
-    node->center.y = 0;
-    node->center.z = 0;
-    node->mass = 0;
-    node->ents = 0;
-    node->parent = -1;
+    // omp_set_lock(&tree->reallocnodes);
+    int new_node;
+    // #pragma omp atomic capture
+    #pragma omp critical
+    {
+        new_node = tree->firstfree++;
+        if (tree->sz <= tree->firstfree)
+        {
+            tree->sz *= 2;
+            tree->nodes = realloc(tree->nodes, tree->sz*sizeof(Octnode));
+        }
+    }
+    // omp_unset_lock(&tree->reallocnodes);
+    tree->nodes[new_node].center.x = 0;
+    tree->nodes[new_node].center.y = 0;
+    tree->nodes[new_node].center.z = 0;
+    tree->nodes[new_node].mass = 0;
+    tree->nodes[new_node].ents = 0;
+    tree->nodes[new_node].parent = -1;
+    tree->nodes[new_node].depth = depth;
     for (uint i = 0; i < 8; i++)
     {
-        node->children[i] = -1;
+        tree->nodes[new_node].children[i] = -1;
     }
+    #ifdef MUTEX
+    for (uint i = 0; i < 8; i++)
+    {
+        omp_init_lock(&tree->nodes[new_node].writelocks[i]);
+    }
+    #endif
+    return new_node;
+    //need to move here because must be sure that memory will not be moved during creation
+    // omp_unset_lock(&tree->reallocnodes);
 }
 
-// Add a entity in the tree
-// creating all the necessary branches
+//CAS is not tested and for sure has some problems. i left it just in case i will want to recover it later
+//if one variable between CAS and MUTEX is defined, the other one must be undefined
 void add_ent(Octtree *tree, Entity *ent, int id)
 {
-    // allocated is used as a boolean
-    int allocated, node_indx, body_pos;
-    Octnode *node;
     double border_size;
-    RVec3 volume_center;
-    // set init value
+    int allocated, node_indx, ent_loc, child_indx, child_val, other, curr_depth;
+    // Octnode *node;
+    RVec3 volume_center = {0, 0, 0};
+    RVec3 pos_ent;
+    copy_RVec3(&pos_ent, &ent->pos);
     allocated = 0;
-    // keep last visited node index
     node_indx = tree->root;
-    node = &tree->nodes[node_indx];
-    border_size = tree->max;
+    // node = &tree->nodes[node_indx];
+    border_size = border_tree(tree);
+    curr_depth = 0;
 
-    // set center of whole volume
-    volume_center.x = 0;
-    volume_center.y = 0;
-    volume_center.z = 0;
-
-    do
+    while (!allocated)
     {
-        // center and border_size are updated to the next branch value
-        body_pos = get_indx_loc(&ent->pos, &volume_center, &border_size);
-        allocated = node->children[body_pos] == -1; // TODO: cambiare con notAllocated
-        if (allocated) // Questo caso è se la posizione non è già assegnata non sta coprendo
+        child_indx = get_indx_loc(&pos_ent, &volume_center, &border_size);
+#ifdef CAS
+        do
         {
-            tree->nodes[node_indx].children[body_pos] = id;
-            tree->nodes[node_indx].ents++;
-        }
-        else
-        {
-            // if the location is occupied by a body-leaf
-            // [leaf, leaf, leaf, ..., root, branch, branch, ...]
-            if (node->children[body_pos] < tree->root)
+            child_val = node->children[chtree->root, 
             {
-                // other is the other leaf
-                RVec3 other_center = volume_center;
-                double other_border = border_size;
-                int other = node->children[body_pos];
-                int other_indx;
-
-                // Add new body to count in the current node
-                tree->nodes[node_indx].ents++;
-                do
+                if (simulate_compare_and_swap(&node->children[child_indx], child_val, LOCKED))
                 {
-                    // double space if tree is full
-                    if (tree->firstfree >= tree->sz)
+
+#endif
+#ifdef MUTEX
+                    omp_set_lock(&tree->nodes[node_indx].writelocks[child_indx]);
+                    child_val = tree->nodes[node_indx].children[child_indx];
+#endif
+                    // child_indx=node->children[ent_loc];
+                    curr_depth++;
+                    // if nothing is located, allocate the leaf
+                    if (child_val == -1)
                     {
-
-                        printf("Sto allargando la memoria dell'albero");
-                        double_Octtree(tree);
-                        //update the pointer to new address
-                        node = &tree->nodes[node_indx];
+#pragma omp atomic write // used to resolve false sharing
+                        tree->nodes[node_indx].children[child_indx] = id;
+                        omp_unset_lock(&tree->nodes[node_indx].writelocks[child_indx]);
+                        allocated = 1;
+                        // if there is already a leaf
                     }
+                    else if (child_val < tree->root)
+                    {
+                        allocated = 0;
+                        other = child_val;
+                        int other_loc;
+                        RVec3 other_center;
+                        copy_RVec3(&other_center, &volume_center);
+                        double other_border = border_size;
+                        int new_node;
+                        while (!allocated)
+                        {
+// #pragma omp atomic capture
+                            // new_node = tree->firstfree++; // new_node has the old firsfree value
+                            // TODO create program that manage array
+                            new_node=init_node(tree, curr_depth);
 
-                    // take first free location and set the parent of the new branch
-                    int free = tree->firstfree;
+                            tree->nodes[new_node].parent = node_indx;
+                            curr_depth++;
 
-                    init_node(&tree->nodes[free]);
-                    tree->nodes[free].parent = node_indx;
-                    // set the new branch as child
-                    node->children[body_pos] = free;
-                    tree->nodes[free].ents = 2;
+                            ent_loc = get_indx_loc(&pos_ent, &volume_center, &border_size);
+                            other_loc = get_indx_loc(&tree->nodes[other].center, &other_center, &other_border);
 
-                    // get leaves position in the new branch
-                    body_pos = get_indx_loc(&ent->pos, &volume_center, &border_size);
-                    // the center of the leaf is the position of the entity associated
-                    other_indx = get_indx_loc(&tree->nodes[other].center, &other_center, &other_border);
-                   // use the new branch as the current one
-                    node_indx = free;
-                    node = &tree->nodes[node_indx];
-                    // update first free location
-                    tree->firstfree++;
+                            allocated = other_loc != ent_loc;
 
-                    // if the leaves will be in different position exit the loop
-                } while (body_pos == other_indx);
+#ifdef CAS
+                            #pragma omp atomic write
+                            tree->nodes[new_node].children[ent_loc] = LOCKED;
+                            if (allocated)
+                            {
+                                #pragma omp atomic write
+                                tree->nodes[new_node].children[other_loc] = LOCKED;
+                            }
+                            #pragma omp atomic write
+                            node->children[child_indx] = new_node;
+// #pragma omp flush(node->children[child_indx], tree->nodes[new_node].children[ent_loc], tree->nodes[new_node].children[other_loc])
 
-                // set new parent in the leaves values
-                tree->nodes[other].parent = node_indx;
-                tree->nodes[id].parent = node_indx;
+                            node = &tree->nodes[new_node];
+#endif
+#ifdef MUTEX
+                            omp_set_lock(&tree->nodes[new_node].writelocks[ent_loc]);
+                            if(allocated){
+                                omp_set_lock(&tree->nodes[new_node].writelocks[other_loc]);
+                            }
+                            tree->nodes[node_indx].children[child_indx]=new_node;
+                            omp_unset_lock(&tree->nodes[node_indx].writelocks[child_indx]);
+#endif
+                            child_indx = ent_loc;
+                            node_indx = new_node;
+                        }
+                        #pragma omp atomic write
+                        tree->nodes[node_indx].children[child_indx] = id;
+                        omp_unset_lock(&tree->nodes[node_indx].writelocks[child_indx]);
+                        #pragma omp atomic write
+                        tree->nodes[node_indx].children[other_loc] = other;
+                        omp_unset_lock(&tree->nodes[node_indx].writelocks[other_loc]);
+                        #pragma omp atomic write
+                        tree->nodes[other].parent = node_indx;
+// #pragma omp flush(tree->nodes[other].parent, node->children[other_loc], node->children[child_indx])
+                    }
+                    else if (child_val >= tree->root)
+                    {
+                        #ifdef CAS
+                        #pragma omp atomic write
+                        node->children[child_indx] = child_val;
 
-                // set the leaves as branch children
-                node->children[body_pos] = id;
-                node->children[other_indx] = other;
-
-                allocated = 1;
+                        #endif
+                        #ifdef MUTEX
+                            omp_unset_lock(&tree->nodes[node_indx].writelocks[child_indx]);
+                        #endif
+// #pragma omp flush(node->children[child_indx])
+                        node_indx = child_val;
+                        // node = &tree->nodes[node_indx];
+                    }
+                    else
+                    {
+                        // ERROR
+                    }
+#ifdef CAS
+                }
+                else
+                {
+                    child_val = LOCKED;
+                }
             }
-            else
-            {
-                // The current node will have one more body in its subtree
-                tree->nodes[node_indx].ents++;
-                // cross the branch
-                node_indx = node->children[body_pos];
-                node = &tree->nodes[node_indx];
-            }
-        }
-    } while (!allocated);
-
-    // Verificare: a sinistra ci sono le foglie ma sono in realtà i pianeti
-    tree->nodes[id].center = ent->pos;
+        } while (child_val == LOCKED);
+#endif
+    }
+    copy_RVec3(&tree->nodes[id].center, &pos_ent);
     tree->nodes[id].mass = ent->mass;
     tree->nodes[id].ents = 1;
     tree->nodes[id].parent = node_indx;
+    tree->nodes[id].depth = curr_depth;
 }
 
-// Add the entities in the tree
-// The entities are located in the first positions, their position in the tree array is the same position in the ents array.
-// The tree is not ready to use, some branch values are not set. Use set_branch_value to complete the tree
-void add_ents(Octtree *tree, Entity ents[], int ents_sz)
+void add_ents(Octtree *tree, Entity *ents, uint ents_sz)
 {
+    #pragma omp parallel for
     for (int i = 0; i < ents_sz; i++)
     {
         add_ent(tree, &ents[i], i);
@@ -395,31 +480,22 @@ void s_get_bounding_box(Entity ents[], int ents_sz, double *max) {
     *max *= 2;
 }
 
+void init_tree(Octtree *tree, int n_ents){
+    tree->firstfree=n_ents;
+    omp_init_lock(&tree->reallocnodes);
+    tree->sz=tree->firstfree*2;
+    tree->nodes=malloc(sizeof(Octnode)*tree->sz);
+    tree->max=0;
+    tree->root=n_ents;
 
-// create tree struct and add root node
-void init_tree(Entity ents[], int ents_sz, Octtree *tree)
-{
-    // calculate the minimum quantity of branch required to save ents_sz bodies
-    // In pratica è ents_sz * 2/3
-    int sz = (ents_sz - 2) / 3 + 1; // = round up (ents_sz-1)/3
-    sz *= 2;                        // double the size to leave some space without need to reallocate
-
-    // add the space required for the bodies
-    sz += ents_sz;
-    tree->firstfree = ents_sz + 1;
-    tree->sz = sz;
-    tree->root = ents_sz;
-    tree->nodes = malloc(sz * sizeof(Octnode));
-
-    Octnode root;
-    init_node(&root);
-    tree->nodes[ents_sz] = root;
+    // Octnode *root = tree->nodes[tree->root];
+    // root->center={0,0,0};
 }
 
 void create_tree(Entity ents[], int ents_sz, Octtree *tree)
 {
     // get bounding box of bodies
-    init_tree(ents, ents_sz, tree);
+    init_tree(tree, ents_sz);
 }
 
 //calculate calculation caused by another body
@@ -507,6 +583,17 @@ void get_acceleration(Octtree *tree, RVec3 *acc, int ents_sz)
     }
 }
 
+void destroy_mutex(Octtree *tree){
+    #pragma omp parallel for
+    for (size_t i = 0; i < tree->firstfree; i++)
+    {
+        for(int j=0; j<8; j++){
+            omp_destroy_lock(&tree->nodes[i].writelocks[j]);
+        }
+    }
+    
+}
+
 // will calculate the bodies position over time
 void propagation(Entity ents[], int ents_sz, int n_steps, float dt, const char *output)
 {
@@ -556,8 +643,12 @@ void propagation(Entity ents[], int ents_sz, int n_steps, float dt, const char *
         }
 
         // Build new tree
-        init_node(&tree.nodes[tree.root]);
-        tree.firstfree=tree.root+1;
+        //TODO think a strategy to reuse mutex without destroying and recreating them
+        destroy_mutex(&tree);
+        tree.firstfree=tree.root;
+        //function takes depth, this was needed in cuda version, but here is not essential. for now put random value
+        //after this call firstfree should be equal to root+1
+        init_node(&tree, 0);
         get_bounding_box(ents, ents_sz, &tree.max);
         add_ents(&tree, ents, ents_sz);
         center_of_mass(&tree, &tree.nodes[tree.root]);
@@ -575,6 +666,27 @@ void propagation(Entity ents[], int ents_sz, int n_steps, float dt, const char *
     fclose(fpt);
     free(tree.nodes);
     free(acc);
+}
+
+void run(Octtree *tree, Entity *ents, uint ents_sz, size_t start, size_t end, size_t dt){
+    // for (size_t t = start; t < end; t+=dt)
+    // {
+        init_node(tree, 0);
+        get_bounding_box(ents, ents_sz, &tree->max);
+        add_ents(tree, ents, ents_sz);
+    // }
+    
+}
+
+void destroy_tree(Octtree *tree){
+    #pragma omp parallel for
+    for(int i=0; i<tree->sz; i++){
+        for(int j=0; j<8; j++){
+            omp_destroy_lock(&tree->nodes[i].writelocks[j]);
+
+        }
+    }
+    free(tree->nodes);
 }
 
 int main(int argc, char *argv[])
