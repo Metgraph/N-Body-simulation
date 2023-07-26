@@ -273,142 +273,131 @@ int init_node(Octtree *tree, int depth)
 
 //CAS is not tested and for sure has some problems. i left it just in case i will want to recover it later
 //if one variable between CAS and MUTEX is defined, the other one must be undefined
-void add_ent(Octtree *tree, Entity *ent, int id)
+
+void double_Octtree(Octtree *tree)
 {
+    tree->sz *= 2;
+    tree->nodes=realloc(tree->nodes, tree->sz*sizeof(Octnode));
+}
+void add_ent(Octtree *tree, Entity *ent, int id) {
+    // allocated is used as a boolean
+    int allocated, node_indx, body_pos;
+    Octnode *node;
     double border_size;
-    int allocated, node_indx, ent_loc, child_indx, child_val, other, curr_depth;
-    // Octnode *node;
-    RVec3 volume_center = {0, 0, 0};
-    RVec3 pos_ent;
-    copy_RVec3(&pos_ent, &ent->pos);
+    RVec3 volume_center;
+    // set init value
     allocated = 0;
+    // keep last visited node index
     node_indx = tree->root;
-    // node = &tree->nodes[node_indx];
-    border_size = border_tree(tree);
-    curr_depth = 0;
+    node = &tree->nodes[node_indx];
+    border_size = tree->max;
 
-    while (!allocated)
-    {
-        child_indx = get_indx_loc(&pos_ent, &volume_center, &border_size);
-#ifdef CAS
-        do
-        {
-            child_val = node->children[chtree->root, 
-            {
-                if (simulate_compare_and_swap(&node->children[child_indx], child_val, LOCKED))
-                {
+    // set center of whole volume
+    volume_center.x = 0;
+    volume_center.y = 0;
+    volume_center.z = 0;
 
-#endif
-#ifdef MUTEX
-                    omp_set_lock(&tree->nodes[node_indx].writelocks[child_indx]);
-                    child_val = tree->nodes[node_indx].children[child_indx];
-#endif
-                    // child_indx=node->children[ent_loc];
-                    curr_depth++;
-                    // if nothing is located, allocate the leaf
-                    if (child_val == -1)
-                    {
-#pragma omp atomic write // used to resolve false sharing
-                        tree->nodes[node_indx].children[child_indx] = id;
-                        omp_unset_lock(&tree->nodes[node_indx].writelocks[child_indx]);
-                        #pragma omp atomic write
-                        tree->nodes[node_indx].ents++;
-                        allocated = 1;
-                        // if there is already a leaf
+    while (!allocated) {
+        // center and border_size are updated to the next branch value
+        body_pos = get_indx_loc(&ent->pos, &volume_center, &border_size);
+        omp_set_lock(&node->writelocks[body_pos]);
+        if (node->children[body_pos] == -1) {
+            #pragma omp atomic write
+            tree->nodes[node_indx].children[body_pos] = id;
+            #pragma omp atomic update
+            tree->nodes[node_indx].ents++;
+            allocated = 1;
+            omp_unset_lock(&node->writelocks[body_pos]);
+        } else {
+            // if the location is occupied by a body-leaf
+            // [leaf, leaf, leaf, ..., root, branch, branch, ...]
+            if (node->children[body_pos] < tree->root) {
+                // other is the other leaf
+                RVec3 other_center = volume_center;
+                double other_border = border_size;
+                int other = node->children[body_pos];
+                int other_indx = body_pos;
+
+                // Add new body to count in the current node
+                #pragma omp atomic update
+                tree->nodes[node_indx].ents++;
+
+                // When the leaves will be in different position exit the loop
+                while (body_pos == other_indx) {
+                    // double up the space if tree is full
+                    if (tree->firstfree >= tree->sz) {
+                        printf(
+                            "WARNING: Sto allargando la memoria dell'albero\n");
+                        double_Octtree(tree);
+                        // update the pointer to new address
+                        node = &tree->nodes[node_indx];
                     }
-                    else if (child_val < tree->root)
-                    {
-                        allocated = 0;
-                        other = child_val;
-                        int other_loc;
-                        RVec3 other_center;
-                        copy_RVec3(&other_center, &volume_center);
-                        double other_border = border_size;
-                        int new_node;
-                        while (!allocated)
-                        {
-// #pragma omp atomic capture
-                            // new_node = tree->firstfree++; // new_node has the old firsfree value
-                            // TODO create program that manage array
-                            new_node=init_node(tree, curr_depth);
 
-                            tree->nodes[new_node].parent = node_indx;
-                            curr_depth++;
+                    // take first free location and set the parent of the new
+                    // branch
+                    int free = tree->firstfree;
 
-                            ent_loc = get_indx_loc(&pos_ent, &volume_center, &border_size);
-                            other_loc = get_indx_loc(&tree->nodes[other].center, &other_center, &other_border);
+                    // free = init_node(&tree->nodes[free], 0);
+                    free = init_node(tree, 0);
+                    tree->nodes[free].parent = node_indx;
+                    // set the new branch as child
+                    #pragma omp atomic write
+                    node->children[body_pos] = free;
+                    #pragma omp atomic write //maybe not needed here
+                    tree->nodes[free].ents = 2;
 
-                            allocated = other_loc != ent_loc;
-
-#ifdef CAS
-                            #pragma omp atomic write
-                            tree->nodes[new_node].children[ent_loc] = LOCKED;
-                            if (allocated)
-                            {
-                                #pragma omp atomic write
-                                tree->nodes[new_node].children[other_loc] = LOCKED;
-                            }
-                            #pragma omp atomic write
-                            node->children[child_indx] = new_node;
-// #pragma omp flush(node->children[child_indx], tree->nodes[new_node].children[ent_loc], tree->nodes[new_node].children[other_loc])
-
-                            node = &tree->nodes[new_node];
-#endif
-#ifdef MUTEX
-                            omp_set_lock(&tree->nodes[new_node].writelocks[ent_loc]);
-                            if(allocated){
-                                omp_set_lock(&tree->nodes[new_node].writelocks[other_loc]);
-                            }
-                            tree->nodes[node_indx].children[child_indx]=new_node;
-                            omp_unset_lock(&tree->nodes[node_indx].writelocks[child_indx]);
-#endif
-                            child_indx = ent_loc;
-                            node_indx = new_node;
-                        }
-                        #pragma omp atomic write
-                        tree->nodes[node_indx].children[child_indx] = id;
-                        omp_unset_lock(&tree->nodes[node_indx].writelocks[child_indx]);
-                        #pragma omp atomic write
-                        tree->nodes[node_indx].children[other_loc] = other;
-                        omp_unset_lock(&tree->nodes[node_indx].writelocks[other_loc]);
-                        #pragma omp atomic write
-                        tree->nodes[other].parent = node_indx;
-// #pragma omp flush(tree->nodes[other].parent, node->children[other_loc], node->children[child_indx])
+                    // get leaves position in the new branch
+                    int old_body_pos=body_pos;
+                    body_pos =
+                        get_indx_loc(&ent->pos, &volume_center, &border_size);
+                    // the center of the leaf is the position of the entity
+                    // associated
+                    other_indx = get_indx_loc(&tree->nodes[other].center,
+                                              &other_center, &other_border);
+                    // use the new branch as the current one
+                    node_indx = free;
+                    omp_set_lock(&tree->nodes[node_indx].writelocks[body_pos]);
+                    if(other_indx!= body_pos){
+                        omp_set_lock(&tree->nodes[node_indx].writelocks[other_indx]);
                     }
-                    else if (child_val >= tree->root)
-                    {
-                        #ifdef CAS
-                        #pragma omp atomic write
-                        node->children[child_indx] = child_val;
-
-                        #endif
-                        #ifdef MUTEX
-                            omp_unset_lock(&tree->nodes[node_indx].writelocks[child_indx]);
-                        #endif
-// #pragma omp flush(node->children[child_indx])
-                        node_indx = child_val;
-                        // node = &tree->nodes[node_indx];
-                    }
-                    else
-                    {
-                        // ERROR
-                    }
-#ifdef CAS
+                    omp_unset_lock(&node->writelocks[old_body_pos]);
+                    node = &tree->nodes[node_indx];
+                    // update first free location
+                    // tree->firstfree++;
                 }
-                else
-                {
-                    child_val = LOCKED;
-                }
+
+                // set new parent in the leaves values
+                tree->nodes[other].parent = node_indx;
+                tree->nodes[id].parent = node_indx;
+
+                // set the leaves as branch children
+                #pragma omp atomic write
+                node->children[body_pos] = id;
+                #pragma omp atomic write
+                node->children[other_indx] = other;
+                omp_unset_lock(&node->writelocks[body_pos]);
+                omp_unset_lock(&node->writelocks[other_indx]);
+
+                allocated = 1;
+            } else { // Descend into the tree
+                // The current node will have one more body in its subtree
+                #pragma omp atomic update
+                tree->nodes[node_indx].ents++;
+                omp_unset_lock(&node->writelocks[body_pos]);
+                // cross the branch
+                node_indx = node->children[body_pos];
+                node = &tree->nodes[node_indx];
             }
-        } while (child_val == LOCKED);
-#endif
+        }
     }
-    copy_RVec3(&tree->nodes[id].center, &pos_ent);
+
+    // Verificare: a sinistra ci sono le foglie ma sono in realtà i pianeti
+    tree->nodes[id].center = ent->pos;
     tree->nodes[id].mass = ent->mass;
     tree->nodes[id].ents = 1;
     tree->nodes[id].parent = node_indx;
-    tree->nodes[id].depth = curr_depth;
 }
+
 
 void add_ents(Octtree *tree, Entity *ents, uint ents_sz)
 {
