@@ -42,7 +42,7 @@ typedef struct {
 
 // const double BIG_G = 6.67e-11;
 const double BIG_G = 1.0;
-const double THETA = 0.0; // Theta = 0: senza approssimazione
+const double THETA = 0.5; // Theta = 0: senza approssimazione
 
 // TODO put in a common file
 uint get_entities(char filename[], Entity **ents) {
