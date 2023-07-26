@@ -42,7 +42,7 @@ typedef struct {
 
 // const double BIG_G = 6.67e-11;
 const double BIG_G = 1.0;
-const double THETA = 0.5; // Theta = 0: senza approssimazione
+const double THETA = 0.0; // Theta = 0: senza approssimazione
 
 // TODO put in a common file
 uint get_entities(char filename[], Entity **ents) {
@@ -214,16 +214,13 @@ void add_ent(Octtree *tree, Entity *ent, int id) {
     volume_center.y = 0;
     volume_center.z = 0;
 
-    do {
+    while (!allocated) {
         // center and border_size are updated to the next branch value
         body_pos = get_indx_loc(&ent->pos, &volume_center, &border_size);
-        allocated =
-            node->children[body_pos] == -1; // TODO: cambiare con notAllocated
-        if (allocated) // Questo caso è se la posizione non è già assegnata non
-                       // sta coprendo
-        {
+        if (node->children[body_pos] == -1) {
             tree->nodes[node_indx].children[body_pos] = id;
             tree->nodes[node_indx].ents++;
+            allocated = 1;
         } else {
             // if the location is occupied by a body-leaf
             // [leaf, leaf, leaf, ..., root, branch, branch, ...]
@@ -232,15 +229,17 @@ void add_ent(Octtree *tree, Entity *ent, int id) {
                 RVec3 other_center = volume_center;
                 double other_border = border_size;
                 int other = node->children[body_pos];
-                int other_indx;
+                int other_indx = body_pos;
 
                 // Add new body to count in the current node
                 tree->nodes[node_indx].ents++;
-                do {
-                    // double space if tree is full
-                    if (tree->firstfree >= tree->sz) {
 
-                        printf("Sto allargando la memoria dell'albero");
+                // When the leaves will be in different position exit the loop
+                while (body_pos == other_indx) {
+                    // double up the space if tree is full
+                    if (tree->firstfree >= tree->sz) {
+                        printf(
+                            "WARNING: Sto allargando la memoria dell'albero\n");
                         double_Octtree(tree);
                         // update the pointer to new address
                         node = &tree->nodes[node_indx];
@@ -268,9 +267,7 @@ void add_ent(Octtree *tree, Entity *ent, int id) {
                     node = &tree->nodes[node_indx];
                     // update first free location
                     tree->firstfree++;
-
-                    // if the leaves will be in different position exit the loop
-                } while (body_pos == other_indx);
+                }
 
                 // set new parent in the leaves values
                 tree->nodes[other].parent = node_indx;
@@ -281,7 +278,7 @@ void add_ent(Octtree *tree, Entity *ent, int id) {
                 node->children[other_indx] = other;
 
                 allocated = 1;
-            } else {
+            } else { // Descend into the tree
                 // The current node will have one more body in its subtree
                 tree->nodes[node_indx].ents++;
                 // cross the branch
@@ -289,7 +286,7 @@ void add_ent(Octtree *tree, Entity *ent, int id) {
                 node = &tree->nodes[node_indx];
             }
         }
-    } while (!allocated);
+    }
 
     // Verificare: a sinistra ci sono le foglie ma sono in realtà i pianeti
     tree->nodes[id].center = ent->pos;
@@ -360,19 +357,7 @@ void init_tree(Entity ents[], int ents_sz, Octtree *tree) {
     tree->sz = sz;
     tree->root = ents_sz;
     tree->nodes = malloc(sz * sizeof(Octnode));
-    // TODO: sostituire coni init node
     Octnode root;
-    /*
-    root.center.x = 0;
-    root.center.y = 0;
-    root.center.z = 0;
-    root.mass = 0;
-    root.parent = -1;
-    root.ents = 0;
-    for(int i=0; i<8; i++){
-        root.children[i]=-1;
-    }
-    */
     init_node(&root);
     tree->nodes[ents_sz] = root;
 }
@@ -413,8 +398,7 @@ void get_acceleration_rec(Octtree *tree, int node_indx, int id, RVec3 *acc,
     } else {
         for (int i = 0; i < 8; i++) {
             int indx = node->children[i];
-            // if (indx > -1 && indx != id)
-            if (indx > -1) {
+            if (indx > -1 && indx != id) {
                 get_acceleration_rec(tree, indx, id, acc, border / 2);
             }
         }
