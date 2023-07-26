@@ -311,6 +311,8 @@ void add_ent(Octtree *tree, Entity *ent, int id)
 #pragma omp atomic write // used to resolve false sharing
                         tree->nodes[node_indx].children[child_indx] = id;
                         omp_unset_lock(&tree->nodes[node_indx].writelocks[child_indx]);
+                        #pragma omp atomic write
+                        tree->nodes[node_indx].ents++;
                         allocated = 1;
                         // if there is already a leaf
                     }
