@@ -3,10 +3,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <string.h>
 #include <omp.h>
 #include "stack.h"
 
 #define BILLION 1000000000.0
+#define DIMENSION 3
 
 #define MUTEX
 
@@ -30,9 +32,9 @@ typedef struct
 // Check L1 chache line size for correct padding size
 // On linux: $ getconf LEVEL1_DCACHE_LINESIZE
 typedef struct {
-    double max;
+    double val;
     double pad[7];
-} max_v;
+} pad_double;
 
 // TODO put in a common file
 typedef struct
@@ -60,8 +62,8 @@ typedef struct
     omp_lock_t reallocnodes;
 } Octtree;
 
-const double BIG_G = 6.67e-11;
-//const double BIG_G = 1.0;
+//const double BIG_G = 6.67e-11;
+const double BIG_G = 1.0;
 const double THETA = 0.5; // Theta = 0: senza approssimazione
 int thread_count;
 
@@ -493,30 +495,26 @@ void center_of_mass(Octtree *tree) {
 }
 
 
-void get_bounding_box(Entity ents[], int ents_sz, double *max_val, max_v *loc_max)
+void get_bounding_box(Entity ents[], int ents_sz, double *max_val, pad_double *loc_max)
 {
     {
         int id = omp_get_thread_num();
-        loc_max[id].max = 0.0;
+        loc_max[id].val = 0.0;
 #       pragma omp for
         for (int i = 0; i < ents_sz; i++) {
-            //printf("Bounding box thread: %d\n", omp_get_thread_num());
-            // double l_max = 0.0;
-            loc_max[id].max = fabs(ents[i].pos.x) > loc_max[id].max ? fabs(ents[i].pos.x) : loc_max[id].max;
-            loc_max[id].max = fabs(ents[i].pos.y) > loc_max[id].max ? fabs(ents[i].pos.y) : loc_max[id].max;
-            loc_max[id].max = fabs(ents[i].pos.z) > loc_max[id].max ? fabs(ents[i].pos.z) : loc_max[id].max;
+            loc_max[id].val = fabs(ents[i].pos.x) > loc_max[id].val ? fabs(ents[i].pos.x) : loc_max[id].val;
+            loc_max[id].val = fabs(ents[i].pos.y) > loc_max[id].val ? fabs(ents[i].pos.y) : loc_max[id].val;
+            loc_max[id].val = fabs(ents[i].pos.z) > loc_max[id].val ? fabs(ents[i].pos.z) : loc_max[id].val;
         }
 #       pragma omp single
         {
         for (int i = 0; i < thread_count; i++) {
-            if (loc_max[i].max > *max_val)
-                *max_val = loc_max[i].max;
+            if (loc_max[i].val > *max_val)
+                *max_val = loc_max[i].val;
         }
         *max_val *= 2.0;
         }
-
     }
-    //printf("Max: %lf\n", *max_val);
 }
 
 void s_get_bounding_box(Entity ents[], int ents_sz, double *max) {
@@ -646,6 +644,114 @@ void destroy_mutex(Octtree *tree){
 
 }
 
+void get_energy(Entity *ents, int sz, double *KE, double *PE, pad_double *local_KE, pad_double *local_PE) {
+
+    // calculate KE
+    int id = omp_get_thread_num();
+    local_KE[id].val = 0.0;
+
+#   pragma omp for
+    for (int i = 0; i < sz; i++) {
+        RVec3 vel = ents[i].vel;
+        double mass = ents[i].mass;
+
+        local_KE[id].val += vel.x * vel.x *mass;
+        local_KE[id].val += vel.x * vel.x *mass;
+        local_KE[id].val += vel.x * vel.x *mass;
+    }
+
+#   pragma omp single
+    {
+        *KE = 0.0;
+        for (int i = 0; i < thread_count; i++)
+            *KE += local_KE[i].val;
+        *KE *= 0.5;
+    }
+
+    //calculate PE
+    local_PE[id].val = 0.0;
+
+#   pragma omp for
+    for (int i = 0; i < sz; i++) {
+        RVec3 *i_pos = &ents[i].pos;
+        for (int j = i; j < sz; j++) {
+            double dx, dy, dz, D;
+            RVec3 *j_pos = &ents[j].pos;
+
+            dx = i_pos->x - j_pos->x;
+            dy = i_pos->y - j_pos->y;
+            dz = i_pos->z - j_pos->z;
+            D = sqrt(dx * dx + dy * dy + dz * dz);
+            D = D > 0 ? 1.0 / D : D;
+
+            local_PE[id].val += -(ents[i].mass * ents[j].mass) * D;
+        }
+    }
+
+#   pragma omp single
+    {
+        *PE = 0.0;
+        for (int i = 0; i < thread_count; i++)
+            *PE += local_PE[i].val;
+        *PE *= BIG_G;
+    }
+}
+
+void s_get_energy(Entity *ents, int sz, double *KE, double *PE) {
+
+    // calculate KE
+    double local_KE=0;
+    for (int i = 0; i < sz; i++) {
+        RVec3 vel = ents[i].vel;
+        double mass = ents[i].mass;
+
+        local_KE += vel.x * vel.x *mass;
+        local_KE += vel.x * vel.x *mass;
+        local_KE += vel.x * vel.x *mass;
+    }
+    *KE=local_KE*0.5;
+
+    //calculate PE
+    double local_PE = 0;
+
+    //calculate only the upper triangle in matrix instead of calculate whole matrix and take only the
+    //upper triangle values like using np.triu
+    for (int i = 0; i < sz; i++) {
+        RVec3 *i_pos = &ents[i].pos;
+        for (int j = i; j < sz; j++) {
+            double dx, dy, dz, D;
+            RVec3 *j_pos = &ents[j].pos;
+
+            dx = i_pos->x - j_pos->x;
+            dy = i_pos->y - j_pos->y;
+            dz = i_pos->z - j_pos->z;
+            D = sqrt(dx * dx + dy * dy + dz * dz);
+            D = D > 0 ? 1.0 / D : D;
+
+            local_PE += -(ents[i].mass * ents[j].mass) * D;
+        }
+    }
+
+    *PE=local_PE*BIG_G;
+}
+
+void save_energy(const char *output, int n_steps, double *KE, double *PE) {
+    FILE *fpt;
+    char energy_file[100];
+    int l;
+
+    *energy_file = '\0';
+    l = strlen(output);
+    strcat(energy_file, output);
+    energy_file[l-4] = '\0';
+    strcat(energy_file, "_energy.csv");
+    fpt = fopen(energy_file, "w");
+    for (int i = 0; i < n_steps; i++)
+        fprintf(fpt, "%lf,%lf,%lf\n", KE[i], PE[i], KE[i]+PE[i]);
+    fclose(fpt);
+}
+
+
 // will calculate the bodies position over time
 void propagation(Entity ents[], int ents_sz, int n_steps, float dt, const char *output)
 {
@@ -655,10 +761,25 @@ void propagation(Entity ents[], int ents_sz, int n_steps, float dt, const char *
     init_node(&tree, 0);
     fpt = fopen(output, "w");
     RVec3 *acc;
-    max_v loc_max[thread_count];
+    pad_double loc_max[thread_count];
+    pad_double local_KE[thread_count];
+    pad_double local_PE[thread_count];
+    double *KE, *PE;
 
     acc = malloc(ents_sz * sizeof(RVec3));
     if (acc == NULL) {
+        fprintf(stderr, "Error during memory allocation\n");
+        exit(2);
+    }
+
+    KE = malloc(n_steps * sizeof(double));
+    if (KE == NULL) {
+        fprintf(stderr, "Error during memory allocation\n");
+        exit(2);
+    }
+
+    PE = malloc(n_steps * sizeof(double));
+    if (PE == NULL) {
         fprintf(stderr, "Error during memory allocation\n");
         exit(2);
     }
@@ -679,7 +800,9 @@ void propagation(Entity ents[], int ents_sz, int n_steps, float dt, const char *
     center_of_mass(&tree);
     //center_of_mass(&tree, &tree.nodes[tree.root]);
     get_acceleration(&tree, acc, ents_sz);
+    }
 
+#   pragma omp parallel num_threads(thread_count)
     for (int t = 0; t < n_steps; t++)
     {
         // 1/2 kick
@@ -730,10 +853,12 @@ void propagation(Entity ents[], int ents_sz, int n_steps, float dt, const char *
             ents[i].vel.y += acc[i].y * dt / 2.0;
             ents[i].vel.z += acc[i].z * dt / 2.0;
         }
+
+        get_energy(ents, ents_sz, KE+t, PE+t, local_KE, local_PE);
     }
-    } // pragma
 
     fclose(fpt);
+    save_energy(output, n_steps, KE, PE);
     free(tree.nodes);
     free(acc);
 }
