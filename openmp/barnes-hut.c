@@ -209,41 +209,14 @@ int get_indx_loc(RVec3 *pos, RVec3 *center, double *border_size)
     return indx;
 }
 
-int simulate_compare_and_swap(int *ptr, int expected, int new_val)
-{
-    // int old_val;
-    // #pragma omp atomic capture
-    // {
-    //     old_val = *ptr;
-    //     if (old_val == expected) {
-    //         *ptr = new_val;
-    //     }
-    // }
-    // return old_val;
-    // int s_cap;
-
-    // here we capture the shared variable and also update it if p is larger
-    int ret;
-#pragma omp atomic compare capture
-    {
-        ret = *ptr;
-        // s_cap = s;
-        if (*ptr == expected)
-        {
-            *ptr = new_val;
-        }
-    }
-    return ret;
-}
-
 //now init_node manages firstfree variable and memory reallocation
 int init_node(Octtree *tree, int depth)
 {
     // omp_set_lock(&tree->reallocnodes);
     int new_node;
-    // #pragma omp atomic capture
     #pragma omp critical
     {
+        #pragma omp atomic capture
         new_node = tree->firstfree++;
         if (tree->sz <= tree->firstfree)
         {
@@ -274,14 +247,7 @@ int init_node(Octtree *tree, int depth)
     // omp_unset_lock(&tree->reallocnodes);
 }
 
-//CAS is not tested and for sure has some problems. i left it just in case i will want to recover it later
-//if one variable between CAS and MUTEX is defined, the other one must be undefined
 
-void double_Octtree(Octtree *tree)
-{
-    tree->sz *= 2;
-    tree->nodes=realloc(tree->nodes, tree->sz*sizeof(Octnode));
-}
 void add_ent(Octtree *tree, Entity *ent, int id) {
     // allocated is used as a boolean
     int allocated, node_indx, body_pos;
@@ -327,14 +293,6 @@ void add_ent(Octtree *tree, Entity *ent, int id) {
 
                 // When the leaves will be in different position exit the loop
                 while (body_pos == other_indx) {
-                    // double up the space if tree is full
-                    if (tree->firstfree >= tree->sz) {
-                        printf(
-                            "WARNING: Sto allargando la memoria dell'albero\n");
-                        double_Octtree(tree);
-                        // update the pointer to new address
-                        node = &tree->nodes[node_indx];
-                    }
 
                     // take first free location and set the parent of the new
                     // branch
@@ -407,6 +365,7 @@ void add_ents(Octtree *tree, Entity *ents, uint ents_sz)
     #pragma omp for
     for (int i = 0; i < ents_sz; i++)
     {
+        printf("adding body %d\n", i);
         add_ent(tree, &ents[i], i);
     }
 }
@@ -532,7 +491,8 @@ void s_get_bounding_box(Entity ents[], int ents_sz, double *max) {
 void init_tree(Octtree *tree, int n_ents){
     tree->firstfree=n_ents;
     omp_init_lock(&tree->reallocnodes);
-    tree->sz=tree->firstfree*2;
+    // tree->sz=tree->firstfree*2;
+    tree->sz=10000000;
     tree->nodes=malloc(sizeof(Octnode)*tree->sz);
     tree->max=0;
     tree->root=n_ents;
@@ -796,10 +756,14 @@ void propagation(Entity ents[], int ents_sz, int n_steps, float dt, const char *
 #   pragma omp parallel num_threads(thread_count)
     {
     get_bounding_box(ents, ents_sz, &tree.max, loc_max);
+    printf("bounding box done\n");
     add_ents(&tree, ents, ents_sz);
+    printf("added ents\n");
     center_of_mass(&tree);
+    printf("calculated centers\n");
     //center_of_mass(&tree, &tree.nodes[tree.root]);
     get_acceleration(&tree, acc, ents_sz);
+    printf("calculated accelerations\n");
     }
 
 #   pragma omp parallel num_threads(thread_count)
