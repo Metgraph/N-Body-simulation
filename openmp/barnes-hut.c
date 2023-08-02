@@ -5,14 +5,11 @@
 #include <time.h>
 #include <string.h>
 #include <omp.h>
-#include "stack.h"
 
 #define BILLION 1000000000.0
 #define DIMENSION 3
-
 #define MUTEX
 
-#define LOCKED -2
 typedef unsigned int uint;
 
 typedef struct
@@ -126,7 +123,7 @@ void print_tree_rec(Octtree *tree, int id, char *space, uint depth){
     //how much divide
     uint temp=1<<depth;
     double border=(tree->max)/(double)temp;
-    printf("%sid: %d, (x:%lf, y:%lf, z:%lf), border: %lf\n", space, id, node->center.x, node->center.y, node->center.z, border);
+    printf("%sid: %d, (x:%lf, y:%lf, z:%lf), mass:%lf, border: %lf\n", space, id, node->center.x, node->center.y, node->center.z, node->mass, border);
     if(node->ents>1){
 
 
@@ -154,13 +151,19 @@ void print_tree(Octtree *tree){
     free(space);
 }
 
-void print_tree_indented(Octtree *tree, Octnode *node, int tabs, int pos) {
+void print_tree_indented(Octtree *tree, Octnode *node, int tabs, int pos, int *body_count) {
     printf("Body position %d -> ", pos);
     if (node->ents == 1){
-        printf("Total ents: %d, parent: %d\n", node->ents, node->parent);
+        int i;
+        for (i = 0; i < 500; i++) {
+            if (tree->nodes[i].parent == node->parent)
+                break;
+        }
+        printf("Total ents: %d, parent: %d, total mass: %lf, bpos: %d.\n", node->ents, node->parent, node->mass, i);
+        *body_count += 1;
         return;
     }
-    printf("Total ents: %d, parent: %d\n", node->ents, node->parent);
+    printf("Total ents: %d, parent: %d, total mass: %lf\n", node->ents, node->parent, node->mass);
     for (int i=0; i<8; i++){
         if (node->children[i] == -1) {
             for (int j=0; j<tabs; j++)
@@ -170,7 +173,7 @@ void print_tree_indented(Octtree *tree, Octnode *node, int tabs, int pos) {
             for (int j=0; j<tabs; j++)
                 printf("\t|");
             printf("Child %d: ", i);
-            print_tree_indented(tree, &tree->nodes[node->children[i]], tabs+1, node->children[i]);
+            print_tree_indented(tree, &tree->nodes[node->children[i]], tabs+1, node->children[i], body_count);
         }
     }
 }
@@ -200,8 +203,7 @@ int get_indx_loc(RVec3 *pos, RVec3 *center, double *border_size)
     x = pos->x >= center->x;
     indx = z * 4 + y * 2 + x;
     // used to calculate new center
-    center->x +=
-        x ? bord_div4 : -(bord_div4); // double(x)*2*border_size - border_size
+    center->x += x ? bord_div4 : -(bord_div4);
     center->y += y ? bord_div4 : -(bord_div4);
     center->z += z ? bord_div4 : -(bord_div4);
     *border_size /= 2;
@@ -210,16 +212,17 @@ int get_indx_loc(RVec3 *pos, RVec3 *center, double *border_size)
 }
 
 //now init_node manages firstfree variable and memory reallocation
-int init_node(Octtree *tree, int depth)
+int init_node(Octtree *tree)
 {
     // omp_set_lock(&tree->reallocnodes);
     int new_node;
+    // #pragma omp atomic capture
     #pragma omp critical
     {
-        #pragma omp atomic capture
         new_node = tree->firstfree++;
         if (tree->sz <= tree->firstfree)
         {
+            printf("Realloc nodes array\n");
             tree->sz *= 2;
             tree->nodes = realloc(tree->nodes, tree->sz*sizeof(Octnode));
         }
@@ -231,7 +234,6 @@ int init_node(Octtree *tree, int depth)
     tree->nodes[new_node].mass = 0;
     tree->nodes[new_node].ents = 0;
     tree->nodes[new_node].parent = -1;
-    tree->nodes[new_node].depth = depth;
     for (uint i = 0; i < 8; i++)
     {
         tree->nodes[new_node].children[i] = -1;
@@ -242,11 +244,11 @@ int init_node(Octtree *tree, int depth)
         omp_init_lock(&tree->nodes[new_node].writelocks[i]);
     }
     #endif
+
     return new_node;
     //need to move here because must be sure that memory will not be moved during creation
     // omp_unset_lock(&tree->reallocnodes);
 }
-
 
 void add_ent(Octtree *tree, Entity *ent, int id) {
     // allocated is used as a boolean
@@ -275,6 +277,12 @@ void add_ent(Octtree *tree, Entity *ent, int id) {
             tree->nodes[node_indx].children[body_pos] = id;
             #pragma omp atomic update
             tree->nodes[node_indx].ents++;
+
+            tree->nodes[id].center = ent->pos;
+            tree->nodes[id].mass = ent->mass;
+            tree->nodes[id].ents = 1;
+            tree->nodes[id].parent = node_indx;
+
             allocated = 1;
             omp_unset_lock(&node->writelocks[body_pos]);
         } else {
@@ -296,11 +304,11 @@ void add_ent(Octtree *tree, Entity *ent, int id) {
 
                     // take first free location and set the parent of the new
                     // branch
-                    int free = tree->firstfree;
+                    int free;
 
-                    // free = init_node(&tree->nodes[free], 0);
-                    free = init_node(tree, 0);
+                    free = init_node(tree);
                     tree->nodes[free].parent = node_indx;
+
                     // set the new branch as child
                     #pragma omp atomic write
                     node->children[body_pos] = free;
@@ -323,13 +331,16 @@ void add_ent(Octtree *tree, Entity *ent, int id) {
                     }
                     omp_unset_lock(&node->writelocks[old_body_pos]);
                     node = &tree->nodes[node_indx];
-                    // update first free location
-                    // tree->firstfree++;
                 }
 
                 // set new parent in the leaves values
                 tree->nodes[other].parent = node_indx;
+
                 tree->nodes[id].parent = node_indx;
+                tree->nodes[id].center = ent->pos;
+                tree->nodes[id].mass = ent->mass;
+                tree->nodes[id].ents = 1;
+
 
                 // set the leaves as branch children
                 #pragma omp atomic write
@@ -351,23 +362,16 @@ void add_ent(Octtree *tree, Entity *ent, int id) {
             }
         }
     }
-
-    // Verificare: a sinistra ci sono le foglie ma sono in realtà i pianeti
-    tree->nodes[id].center = ent->pos;
-    tree->nodes[id].mass = ent->mass;
-    tree->nodes[id].ents = 1;
-    tree->nodes[id].parent = node_indx;
 }
-
 
 void add_ents(Octtree *tree, Entity *ents, uint ents_sz)
 {
-    #pragma omp for
+#   pragma omp for nowait
     for (int i = 0; i < ents_sz; i++)
     {
-        printf("adding body %d\n", i);
         add_ent(tree, &ents[i], i);
     }
+#   pragma omp barrier
 }
 
 void s_center_of_mass(Octtree *tree, Octnode *node) {
@@ -403,77 +407,56 @@ void update_center_of_mass(Octnode *child, RVec3 *center, double *mass) {
     center->z = (child->center.z * child->mass / new_mass) + (center->z * *mass / new_mass);
 
     *mass = new_mass;
-    //printf("Updating data: x: %lf, y: %lf, z: %lf, mass: %lf\n", center->x, center->y, center->z, *mass);
 }
 
 void center_of_mass(Octtree *tree) {
 
 #   pragma omp for nowait
     for (int n = tree->firstfree - 1; n >= tree->root; n--) {
-        /* printf("Thread %d: node %d\n", omp_get_thread_num(), n); */
         Octnode *my_node = &tree->nodes[n];
         RVec3 l_center = my_node->center;
         double l_new_mass = my_node->mass;
         int j;
 
-        // Init stack structure
-        stack s;
-        int a[8];
-        s.top = -1;
-        s.size = 8;
-        s.array = a;
+        int counter = 0;
 
-        for (int i = 0; i < 8; i++) {
-            j = my_node->children[i];
-            if (j != -1) {
-                if (tree->nodes[j].mass != 0) {
-                    // calcola centro e massa
-                    update_center_of_mass(&tree->nodes[j], &l_center, &l_new_mass);
-                } else {
-                    // Aggiungi a stack
-                    /* printf("Thread %d: Pushing %d\n", omp_get_thread_num(), j); */
-                    push(&s, my_node->children[i]);
-                }
-            }
-        }
-
-        while(!is_empty(&s)) {
-            int i = seek(&s);
-            /* printf("Thread %d: Try to seek node %d\n", omp_get_thread_num(), i); */
-            if (tree->nodes[i].mass != 0) {
-                pop(&s);
-                //printf("Popped %d\n", k);
-                update_center_of_mass(&tree->nodes[i], &l_center, &l_new_mass);
+        j = my_node->children[counter];
+        while (counter < 8) {
+            if (j == -1) {
+                j = my_node->children[++counter];
+            } else if (tree->nodes[j].mass != 0) {
+                update_center_of_mass(&tree->nodes[j], &l_center, &l_new_mass);
+                j = my_node->children[++counter];
             }
         }
 
         my_node->center = l_center;
         my_node->mass = l_new_mass;
-        /* printf("Thread %d: Finish with node: %d - new mass: %lf\n", omp_get_thread_num(), n, my_node->mass); */
     }
+#   pragma omp barrier
 }
-
 
 void get_bounding_box(Entity ents[], int ents_sz, double *max_val, pad_double *loc_max)
 {
-    {
-        int id = omp_get_thread_num();
-        loc_max[id].val = 0.0;
-#       pragma omp for
-        for (int i = 0; i < ents_sz; i++) {
-            loc_max[id].val = fabs(ents[i].pos.x) > loc_max[id].val ? fabs(ents[i].pos.x) : loc_max[id].val;
-            loc_max[id].val = fabs(ents[i].pos.y) > loc_max[id].val ? fabs(ents[i].pos.y) : loc_max[id].val;
-            loc_max[id].val = fabs(ents[i].pos.z) > loc_max[id].val ? fabs(ents[i].pos.z) : loc_max[id].val;
-        }
-#       pragma omp single
-        {
-        for (int i = 0; i < thread_count; i++) {
-            if (loc_max[i].val > *max_val)
-                *max_val = loc_max[i].val;
-        }
-        *max_val *= 2.0;
-        }
+    int id = omp_get_thread_num();
+    loc_max[id].val = 0.0;
+#   pragma omp for
+    for (int i = 0; i < ents_sz; i++) {
+        loc_max[id].val = fabs(ents[i].pos.x) > loc_max[id].val ? fabs(ents[i].pos.x) : loc_max[id].val;
+        loc_max[id].val = fabs(ents[i].pos.y) > loc_max[id].val ? fabs(ents[i].pos.y) : loc_max[id].val;
+        loc_max[id].val = fabs(ents[i].pos.z) > loc_max[id].val ? fabs(ents[i].pos.z) : loc_max[id].val;
     }
+
+#   pragma omp single
+    {
+    int total_threads = omp_get_num_threads();
+    for (int i = 0; i < total_threads; i++) {
+        if (loc_max[i].val > *max_val)
+            *max_val = loc_max[i].val;
+    }
+    *max_val *= 2.0;
+    }
+
 }
 
 void s_get_bounding_box(Entity ents[], int ents_sz, double *max) {
@@ -484,27 +467,18 @@ void s_get_bounding_box(Entity ents[], int ents_sz, double *max) {
         *max = fabs(ents[i].pos.y) > *max ? fabs(ents[i].pos.y) : *max;
         *max = fabs(ents[i].pos.z) > *max ? fabs(ents[i].pos.z) : *max;
     }
-    printf("Max: %lf\n", *max);
+    //printf("Max: %lf\n", *max);
     *max *= 2;
 }
 
-void init_tree(Octtree *tree, int n_ents){
-    tree->firstfree=n_ents;
+void create_tree(int ents_sz, Octtree *tree)
+{
+    tree->firstfree=ents_sz;
     omp_init_lock(&tree->reallocnodes);
-    // tree->sz=tree->firstfree*2;
-    tree->sz=10000000;
+    tree->sz = ents_sz * 5;
     tree->nodes=malloc(sizeof(Octnode)*tree->sz);
     tree->max=0;
-    tree->root=n_ents;
-
-    // Octnode *root = tree->nodes[tree->root];
-    // root->center={0,0,0};
-}
-
-void create_tree(Entity ents[], int ents_sz, Octtree *tree)
-{
-    // get bounding box of bodies
-    init_tree(tree, ents_sz);
+    tree->root=ents_sz;
 }
 
 //calculate calculation caused by another body
@@ -540,17 +514,16 @@ void get_acceleration_rec(Octtree *tree, int node_indx, int id, RVec3 *acc, doub
     }
     else
     {
-        /*
         for (int i = 0; i < 8; i++)
         {
             int indx = node->children[i];
-            //if (indx > -1 && indx != id)
-            if (indx > -1)
+            if (indx > -1 && indx != id)
+            //if (indx > -1)
             {
                 get_acceleration_rec(tree, indx, id, acc, border / 2);
             }
         }
-        */
+        /*
         double half_b = border / 2;
         int *c = node->children;
         if (c[0] != -1 && c[0] != id)
@@ -577,6 +550,7 @@ void get_acceleration_rec(Octtree *tree, int node_indx, int id, RVec3 *acc, doub
         if (c[7] != -1 && c[7] != id)
             get_acceleration_rec(tree, c[7], id, acc, half_b);
 
+        */
     }
 }
 
@@ -660,7 +634,7 @@ void get_energy(Entity *ents, int sz, double *KE, double *PE, pad_double *local_
 void s_get_energy(Entity *ents, int sz, double *KE, double *PE) {
 
     // calculate KE
-    double local_KE=0;
+    double local_KE=0.0;
     for (int i = 0; i < sz; i++) {
         RVec3 vel = ents[i].vel;
         double mass = ents[i].mass;
@@ -672,7 +646,7 @@ void s_get_energy(Entity *ents, int sz, double *KE, double *PE) {
     *KE=local_KE*0.5;
 
     //calculate PE
-    double local_PE = 0;
+    double local_PE = 0.0;
 
     //calculate only the upper triangle in matrix instead of calculate whole matrix and take only the
     //upper triangle values like using np.triu
@@ -691,7 +665,6 @@ void s_get_energy(Entity *ents, int sz, double *KE, double *PE) {
             local_PE += -(ents[i].mass * ents[j].mass) * D;
         }
     }
-
     *PE=local_PE*BIG_G;
 }
 
@@ -717,14 +690,20 @@ void propagation(Entity ents[], int ents_sz, int n_steps, float dt, const char *
 {
     FILE *fpt;
     Octtree tree;
-    create_tree(ents, ents_sz, &tree);
-    init_node(&tree, 0);
-    fpt = fopen(output, "w");
     RVec3 *acc;
     pad_double loc_max[thread_count];
     pad_double local_KE[thread_count];
     pad_double local_PE[thread_count];
     double *KE, *PE;
+
+    create_tree(ents_sz, &tree);
+    init_node(&tree);
+    tree.max = 0.0;
+
+    fpt = fopen(output, "w");
+
+    for (int i = 0; i < thread_count; i++)
+        loc_max[i].val = 0.0;
 
     acc = malloc(ents_sz * sizeof(RVec3));
     if (acc == NULL) {
@@ -751,22 +730,13 @@ void propagation(Entity ents[], int ents_sz, int n_steps, float dt, const char *
                 ents[i].pos.z, ents[i].mass);
     }
 
-    tree.max = 0.0;
-
 #   pragma omp parallel num_threads(thread_count)
     {
     get_bounding_box(ents, ents_sz, &tree.max, loc_max);
-    printf("bounding box done\n");
     add_ents(&tree, ents, ents_sz);
-    printf("added ents\n");
     center_of_mass(&tree);
-    printf("calculated centers\n");
-    //center_of_mass(&tree, &tree.nodes[tree.root]);
     get_acceleration(&tree, acc, ents_sz);
-    printf("calculated accelerations\n");
-    }
 
-#   pragma omp parallel num_threads(thread_count)
     for (int t = 0; t < n_steps; t++)
     {
         // 1/2 kick
@@ -795,17 +765,20 @@ void propagation(Entity ents[], int ents_sz, int n_steps, float dt, const char *
         // Build new tree
         //TODO think a strategy to reuse mutex without destroying and recreating them
         destroy_mutex(&tree);
+
 #       pragma omp single
         {
         tree.firstfree=tree.root;
         tree.max = 0.0;
-        init_node(&tree, 0);
+        init_node(&tree);
         }
         //function takes depth, this was needed in cuda version, but here is not essential. for now put random value
         //after this call firstfree should be equal to root+1
 
         get_bounding_box(ents, ents_sz, &tree.max, loc_max);
+
         add_ents(&tree, ents, ents_sz);
+
         center_of_mass(&tree);
 
         get_acceleration(&tree, acc, ents_sz);
@@ -820,22 +793,12 @@ void propagation(Entity ents[], int ents_sz, int n_steps, float dt, const char *
 
         get_energy(ents, ents_sz, KE+t, PE+t, local_KE, local_PE);
     }
+    } // pragma
 
     fclose(fpt);
     save_energy(output, n_steps, KE, PE);
     free(tree.nodes);
     free(acc);
-}
-
-void destroy_tree(Octtree *tree){
-    #pragma omp parallel for
-    for(int i=0; i<tree->sz; i++){
-        for(int j=0; j<8; j++){
-            omp_destroy_lock(&tree->nodes[i].writelocks[j]);
-
-        }
-    }
-    free(tree->nodes);
 }
 
 int main(int argc, char *argv[])

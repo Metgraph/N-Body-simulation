@@ -36,7 +36,7 @@ parallelfordebug:
 
 barneshut:
 	${COMPILER} -Wall -g -o ${BUILD_DIR}/barnes-hut serial/barnes-hut.c -lm
-	${COMPILER} -Wall -g -o ${BUILD_DIR}/barnes-hut-omp openmp/barnes-hut.c openmp/stack.c -lm -fopenmp
+	${COMPILER} -Wall -g -o ${BUILD_DIR}/barnes-hut-omp openmp/barnes-hut.c -lm -fopenmp
 
 play:
 	python3 utils/pygame-show.py $(FILE)
