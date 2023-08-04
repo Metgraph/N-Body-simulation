@@ -1,10 +1,10 @@
 // https://lewiscoleblog.com/barnes-hut
 #include <math.h>
+#include <omp.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
 #include <string.h>
-#include <omp.h>
+#include <time.h>
 
 #define BILLION 1000000000.0
 
@@ -45,15 +45,14 @@ typedef struct {
     double max;
     Octnode *nodes;
     int sz;
-    //useless, but not yet tested with its removal
+    // useless, but not yet tested with its removal
     omp_lock_t reallocnodes;
 } Octtree;
 
-//const double BIG_G = 6.67e-11;
+// const double BIG_G = 6.67e-11;
 const double BIG_G = 1.0;
 const double THETA = 0.5; // Theta = 0: senza approssimazione
 int thread_count;
-
 
 uint get_entities(char filename[], Entity **ents) {
     Entity e_buff;
@@ -78,8 +77,7 @@ uint get_entities(char filename[], Entity **ents) {
     while ((status =
                 fscanf(f, "%lf, %lf, %lf, %lf, %lf, %lf, %lf\n", &e_buff.pos.x,
                        &e_buff.pos.y, &e_buff.pos.z, &e_buff.vel.x,
-                       &e_buff.vel.y, &e_buff.vel.z, &e_buff.mass)) == 7)
-    {
+                       &e_buff.vel.y, &e_buff.vel.z, &e_buff.mass)) == 7) {
         size++;
         if (ret_size < size) {
             // TODO Check for error in allocation
@@ -91,8 +89,7 @@ uint get_entities(char filename[], Entity **ents) {
     }
 
     // check if while ended because the end of the file has been reached
-    if (fgetc(f) != EOF)
-    {
+    if (fgetc(f) != EOF) {
         fprintf(stderr, "Error reading file '%s': file is not well formed\n",
                 filename);
         fclose(f);
@@ -104,69 +101,73 @@ uint get_entities(char filename[], Entity **ents) {
     return size;
 }
 
-
-void print_tree_rec(Octtree *tree, int id, char *space, uint depth){
-    Octnode *node=&tree->nodes[id];
-    //how much divide
-    uint temp=1<<depth;
-    double border=(tree->max)/(double)temp;
-    printf("%sid: %d, (x:%lf, y:%lf, z:%lf), mass:%lf, border: %lf\n", space, id, node->center.x, node->center.y, node->center.z, node->mass, border);
-    if(node->ents>1){
-
+void print_tree_rec(Octtree *tree, int id, char *space, uint depth) {
+    Octnode *node = &tree->nodes[id];
+    // how much divide
+    uint temp = 1 << depth;
+    double border = (tree->max) / (double)temp;
+    printf("%sid: %d, (x:%lf, y:%lf, z:%lf), mass:%lf, border: %lf\n", space,
+           id, node->center.x, node->center.y, node->center.z, node->mass,
+           border);
+    if (node->ents > 1) {
 
         int i;
-        for(i=depth*4; i<depth*4+4; i++){
-            space[i]=' ';
-
+        for (i = depth * 4; i < depth * 4 + 4; i++) {
+            space[i] = ' ';
         }
-        space[i]='\0';
-        for(int i=0; i<8; i++){
-            if(node->children[i]>-1){
-                print_tree_rec(tree, node->children[i], space, depth+1);
+        space[i] = '\0';
+        for (int i = 0; i < 8; i++) {
+            if (node->children[i] > -1) {
+                print_tree_rec(tree, node->children[i], space, depth + 1);
             }
         }
-        space[depth*4]='\0';
+        space[depth * 4] = '\0';
     }
 }
 
-//used for debug
-void print_tree(Octtree *tree){
-    uint sz_space=4*40;
-    char *space=malloc(sz_space*sizeof(char));
-    space[0]='\0';
+// used for debug
+void print_tree(Octtree *tree) {
+    uint sz_space = 4 * 40;
+    char *space = malloc(sz_space * sizeof(char));
+    space[0] = '\0';
     print_tree_rec(tree, tree->root, space, 0);
     free(space);
 }
 
-void print_tree_indented(Octtree *tree, Octnode *node, int tabs, int pos, int *body_count) {
+void print_tree_indented(Octtree *tree, Octnode *node, int tabs, int pos,
+                         int *body_count) {
     printf("Body position %d -> ", pos);
-    if (node->ents == 1){
+    if (node->ents == 1) {
         int i;
         for (i = 0; i < 500; i++) {
             if (tree->nodes[i].parent == node->parent)
                 break;
         }
-        printf("Total ents: %d, parent: %d, total mass: %lf, bpos: %d.\n", node->ents, node->parent, node->mass, i);
+        printf("Total ents: %d, parent: %d, total mass: %lf, bpos: %d.\n",
+               node->ents, node->parent, node->mass, i);
         *body_count += 1;
         return;
     }
-    printf("Total ents: %d, parent: %d, total mass: %lf\n", node->ents, node->parent, node->mass);
-    for (int i=0; i<8; i++){
+    printf("Total ents: %d, parent: %d, total mass: %lf\n", node->ents,
+           node->parent, node->mass);
+    for (int i = 0; i < 8; i++) {
         if (node->children[i] == -1) {
-            for (int j=0; j<tabs; j++)
+            for (int j = 0; j < tabs; j++)
                 printf("\t|");
             printf("Child %d is empty\n", i);
         } else {
-            for (int j=0; j<tabs; j++)
+            for (int j = 0; j < tabs; j++)
                 printf("\t|");
             printf("Child %d: ", i);
-            print_tree_indented(tree, &tree->nodes[node->children[i]], tabs+1, node->children[i], body_count);
+            print_tree_indented(tree, &tree->nodes[node->children[i]], tabs + 1,
+                                node->children[i], body_count);
         }
     }
 }
 
 double get_distance(RVec3 *r1, RVec3 *r2) {
-    return sqrt(pow(r1->x - r2->x, 2) + pow(r1->y - r2->y, 2) + pow(r1->z - r2->z, 2));
+    return sqrt(pow(r1->x - r2->x, 2) + pow(r1->y - r2->y, 2) +
+                pow(r1->z - r2->z, 2));
 }
 
 int get_indx_loc(RVec3 *pos, RVec3 *center, double *border_size) {
@@ -188,19 +189,19 @@ int get_indx_loc(RVec3 *pos, RVec3 *center, double *border_size) {
     return indx;
 }
 
-//now init_node manages firstfree variable and memory reallocation
+// now init_node manages firstfree variable and memory reallocation
 int init_node(Octtree *tree) {
     // omp_set_lock(&tree->reallocnodes);
     int new_node;
-    // #pragma omp atomic capture
-    #pragma omp critical
+// #pragma omp atomic capture
+#pragma omp critical
     {
         new_node = tree->firstfree++;
         if (tree->sz <= tree->firstfree) {
             printf("No more space for new nodes! Exiting.\n");
             exit(1);
-            //tree->sz *= 2;
-            //tree->nodes = realloc(tree->nodes, tree->sz*sizeof(Octnode));
+            // tree->sz *= 2;
+            // tree->nodes = realloc(tree->nodes, tree->sz*sizeof(Octnode));
         }
     }
     tree->nodes[new_node].center.x = 0;
@@ -238,9 +239,9 @@ void add_ent(Octtree *tree, Entity *ent, int id) {
         body_pos = get_indx_loc(&ent->pos, &volume_center, &border_size);
         omp_set_lock(&node->writelocks[body_pos]);
         if (node->children[body_pos] == -1) {
-            #pragma omp atomic write
+#pragma omp atomic write
             tree->nodes[node_indx].children[body_pos] = id;
-            #pragma omp atomic update
+#pragma omp atomic update
             tree->nodes[node_indx].ents++;
 
             tree->nodes[id].center = ent->pos;
@@ -260,8 +261,8 @@ void add_ent(Octtree *tree, Entity *ent, int id) {
                 int other = node->children[body_pos];
                 int other_indx = body_pos;
 
-                // Add new body to count in the current node
-                #pragma omp atomic update
+// Add new body to count in the current node
+#pragma omp atomic update
                 tree->nodes[node_indx].ents++;
 
                 // When the leaves will be in different position exit the loop
@@ -274,14 +275,14 @@ void add_ent(Octtree *tree, Entity *ent, int id) {
                     free = init_node(tree);
                     tree->nodes[free].parent = node_indx;
 
-                    // set the new branch as child
-                    #pragma omp atomic write
+// set the new branch as child
+#pragma omp atomic write
                     node->children[body_pos] = free;
-                    #pragma omp atomic write //maybe not needed here
+#pragma omp atomic write // maybe not needed here
                     tree->nodes[free].ents = 2;
 
                     // get leaves position in the new branch
-                    int old_body_pos=body_pos;
+                    int old_body_pos = body_pos;
                     body_pos =
                         get_indx_loc(&ent->pos, &volume_center, &border_size);
                     // the center of the leaf is the position of the entity
@@ -291,8 +292,9 @@ void add_ent(Octtree *tree, Entity *ent, int id) {
                     // use the new branch as the current one
                     node_indx = free;
                     omp_set_lock(&tree->nodes[node_indx].writelocks[body_pos]);
-                    if(other_indx!= body_pos){
-                        omp_set_lock(&tree->nodes[node_indx].writelocks[other_indx]);
+                    if (other_indx != body_pos) {
+                        omp_set_lock(
+                            &tree->nodes[node_indx].writelocks[other_indx]);
                     }
                     omp_unset_lock(&node->writelocks[old_body_pos]);
                     node = &tree->nodes[node_indx];
@@ -306,19 +308,18 @@ void add_ent(Octtree *tree, Entity *ent, int id) {
                 tree->nodes[id].mass = ent->mass;
                 tree->nodes[id].ents = 1;
 
-
-                // set the leaves as branch children
-                #pragma omp atomic write
+// set the leaves as branch children
+#pragma omp atomic write
                 node->children[body_pos] = id;
-                #pragma omp atomic write
+#pragma omp atomic write
                 node->children[other_indx] = other;
                 omp_unset_lock(&node->writelocks[body_pos]);
                 omp_unset_lock(&node->writelocks[other_indx]);
 
                 allocated = 1;
             } else { // Descend into the tree
-                // The current node will have one more body in its subtree
-                #pragma omp atomic update
+// The current node will have one more body in its subtree
+#pragma omp atomic update
                 tree->nodes[node_indx].ents++;
                 omp_unset_lock(&node->writelocks[body_pos]);
                 // cross the branch
@@ -329,28 +330,30 @@ void add_ent(Octtree *tree, Entity *ent, int id) {
     }
 }
 
-void add_ents(Octtree *tree, Entity *ents, uint ents_sz)
-{
-#   pragma omp for nowait
+void add_ents(Octtree *tree, Entity *ents, uint ents_sz) {
+#pragma omp for nowait
     for (int i = 0; i < ents_sz; i++) {
         add_ent(tree, &ents[i], i);
     }
-#   pragma omp barrier
+#pragma omp barrier
 }
 
 void update_center_of_mass(Octnode *child, RVec3 *center, double *mass) {
     double new_mass = *mass + child->mass;
 
-    center->x = (child->center.x * child->mass / new_mass) + (center->x * *mass / new_mass);
-    center->y = (child->center.y * child->mass / new_mass) + (center->y * *mass / new_mass);
-    center->z = (child->center.z * child->mass / new_mass) + (center->z * *mass / new_mass);
+    center->x = (child->center.x * child->mass / new_mass) +
+                (center->x * *mass / new_mass);
+    center->y = (child->center.y * child->mass / new_mass) +
+                (center->y * *mass / new_mass);
+    center->z = (child->center.z * child->mass / new_mass) +
+                (center->z * *mass / new_mass);
 
     *mass = new_mass;
 }
 
 void center_of_mass(Octtree *tree) {
 
-#   pragma omp for nowait
+#pragma omp for nowait
     for (int n = tree->firstfree - 1; n >= tree->root; n--) {
         Octnode *my_node = &tree->nodes[n];
         RVec3 l_center = my_node->center;
@@ -372,42 +375,48 @@ void center_of_mass(Octtree *tree) {
         my_node->center = l_center;
         my_node->mass = l_new_mass;
     }
-#   pragma omp barrier
+#pragma omp barrier
 }
 
-void get_bounding_box(Entity ents[], int ents_sz, double *max_val, pad_double *loc_max) {
+void get_bounding_box(Entity ents[], int ents_sz, double *max_val,
+                      pad_double *loc_max) {
     int id = omp_get_thread_num();
     loc_max[id].val = 0.0;
 
-#   pragma omp for
+#pragma omp for
     for (int i = 0; i < ents_sz; i++) {
-        loc_max[id].val = fabs(ents[i].pos.x) > loc_max[id].val ? fabs(ents[i].pos.x) : loc_max[id].val;
-        loc_max[id].val = fabs(ents[i].pos.y) > loc_max[id].val ? fabs(ents[i].pos.y) : loc_max[id].val;
-        loc_max[id].val = fabs(ents[i].pos.z) > loc_max[id].val ? fabs(ents[i].pos.z) : loc_max[id].val;
+        loc_max[id].val = fabs(ents[i].pos.x) > loc_max[id].val
+                              ? fabs(ents[i].pos.x)
+                              : loc_max[id].val;
+        loc_max[id].val = fabs(ents[i].pos.y) > loc_max[id].val
+                              ? fabs(ents[i].pos.y)
+                              : loc_max[id].val;
+        loc_max[id].val = fabs(ents[i].pos.z) > loc_max[id].val
+                              ? fabs(ents[i].pos.z)
+                              : loc_max[id].val;
     }
 
-#   pragma omp single
+#pragma omp single
     {
-    int total_threads = omp_get_num_threads();
-    for (int i = 0; i < total_threads; i++) {
-        if (loc_max[i].val > *max_val)
-            *max_val = loc_max[i].val;
+        int total_threads = omp_get_num_threads();
+        for (int i = 0; i < total_threads; i++) {
+            if (loc_max[i].val > *max_val)
+                *max_val = loc_max[i].val;
+        }
+        *max_val *= 2.0;
     }
-    *max_val *= 2.0;
-    }
-
 }
 
 void create_tree(int ents_sz, Octtree *tree) {
-    tree->firstfree=ents_sz;
+    tree->firstfree = ents_sz;
     omp_init_lock(&tree->reallocnodes);
     tree->sz = ents_sz * 5;
-    tree->nodes=malloc(sizeof(Octnode)*tree->sz);
-    tree->max=0;
-    tree->root=ents_sz;
+    tree->nodes = malloc(sizeof(Octnode) * tree->sz);
+    tree->max = 0;
+    tree->root = ents_sz;
 }
 
-//calculate calculation caused by another body
+// calculate calculation caused by another body
 void calculate_acceleration(Octnode *ent, Octnode *node, RVec3 *acc) {
 
     RVec3 r_vector;
@@ -417,7 +426,7 @@ void calculate_acceleration(Octnode *ent, Octnode *node, RVec3 *acc) {
     r_vector.z = node->center.z - ent->center.z;
 
     double inv_r3 = r_vector.x * r_vector.x + r_vector.y * r_vector.y +
-                        r_vector.z * r_vector.z + 0.01;
+                    r_vector.z * r_vector.z + 0.01;
     inv_r3 = pow(inv_r3, -1.5);
 
     acc->x += BIG_G * r_vector.x * inv_r3 * node->mass;
@@ -425,8 +434,9 @@ void calculate_acceleration(Octnode *ent, Octnode *node, RVec3 *acc) {
     acc->z += BIG_G * r_vector.z * inv_r3 * node->mass;
 }
 
-//calculate body acceleration
-void get_acceleration_rec(Octtree *tree, int node_indx, int id, RVec3 *acc, double border) {
+// calculate body acceleration
+void get_acceleration_rec(Octtree *tree, int node_indx, int id, RVec3 *acc,
+                          double border) {
     double distance;
     Octnode *ent = &tree->nodes[id];
     Octnode *node = &tree->nodes[node_indx];
@@ -444,10 +454,9 @@ void get_acceleration_rec(Octtree *tree, int node_indx, int id, RVec3 *acc, doub
     }
 }
 
-//call recursive function get_acceleration_rec
-void get_acceleration(Octtree *tree, RVec3 *acc, int ents_sz)
-{
-#   pragma omp for
+// call recursive function get_acceleration_rec
+void get_acceleration(Octtree *tree, RVec3 *acc, int ents_sz) {
+#pragma omp for
     for (int i = 0; i < ents_sz; i++) {
         acc[i].x = 0;
         acc[i].y = 0;
@@ -456,41 +465,42 @@ void get_acceleration(Octtree *tree, RVec3 *acc, int ents_sz)
     }
 }
 
-void init_mutex(Octtree *tree){
-    #pragma omp for
+void init_mutex(Octtree *tree) {
+#pragma omp for
     for (size_t i = 0; i < tree->sz; i++) {
-        for(int j=0; j<8; j++){
+        for (int j = 0; j < 8; j++) {
             omp_init_lock(&tree->nodes[i].writelocks[j]);
         }
     }
 }
 
-void destroy_mutex(Octtree *tree){
-    #pragma omp for
+void destroy_mutex(Octtree *tree) {
+#pragma omp for
     for (size_t i = 0; i < tree->sz; i++) {
-        for(int j=0; j<8; j++){
+        for (int j = 0; j < 8; j++) {
             omp_destroy_lock(&tree->nodes[i].writelocks[j]);
         }
     }
 }
 
-void get_energy(Entity *ents, int sz, double *KE, double *PE, pad_double *local_KE, pad_double *local_PE) {
+void get_energy(Entity *ents, int sz, double *KE, double *PE,
+                pad_double *local_KE, pad_double *local_PE) {
 
     // calculate KE
     int id = omp_get_thread_num();
     local_KE[id].val = 0.0;
 
-#   pragma omp for
+#pragma omp for
     for (int i = 0; i < sz; i++) {
         RVec3 vel = ents[i].vel;
         double mass = ents[i].mass;
 
-        local_KE[id].val += vel.x * vel.x *mass;
-        local_KE[id].val += vel.x * vel.x *mass;
-        local_KE[id].val += vel.x * vel.x *mass;
+        local_KE[id].val += vel.x * vel.x * mass;
+        local_KE[id].val += vel.x * vel.x * mass;
+        local_KE[id].val += vel.x * vel.x * mass;
     }
 
-#   pragma omp single
+#pragma omp single
     {
         *KE = 0.0;
         for (int i = 0; i < thread_count; i++)
@@ -498,10 +508,10 @@ void get_energy(Entity *ents, int sz, double *KE, double *PE, pad_double *local_
         *KE *= 0.5;
     }
 
-    //calculate PE
+    // calculate PE
     local_PE[id].val = 0.0;
 
-#   pragma omp for
+#pragma omp for
     for (int i = 0; i < sz; i++) {
         RVec3 *i_pos = &ents[i].pos;
         for (int j = i; j < sz; j++) {
@@ -518,7 +528,7 @@ void get_energy(Entity *ents, int sz, double *KE, double *PE, pad_double *local_
         }
     }
 
-#   pragma omp single
+#pragma omp single
     {
         *PE = 0.0;
         for (int i = 0; i < thread_count; i++)
@@ -535,18 +545,17 @@ void save_energy(const char *output, int n_steps, double *KE, double *PE) {
     *energy_file = '\0';
     l = strlen(output);
     strcat(energy_file, output);
-    energy_file[l-4] = '\0';
+    energy_file[l - 4] = '\0';
     strcat(energy_file, "_energy.csv");
     fpt = fopen(energy_file, "w");
     for (int i = 0; i < n_steps; i++)
-        fprintf(fpt, "%lf,%lf,%lf\n", KE[i], PE[i], KE[i]+PE[i]);
+        fprintf(fpt, "%lf,%lf,%lf\n", KE[i], PE[i], KE[i] + PE[i]);
     fclose(fpt);
 }
 
-
 // will calculate the bodies position over time
-void propagation(Entity ents[], int ents_sz, int n_steps, float dt, const char *output)
-{
+void propagation(Entity ents[], int ents_sz, int n_steps, float dt,
+                 const char *output) {
     FILE *fpt;
     Octtree tree;
     RVec3 *acc;
@@ -584,69 +593,64 @@ void propagation(Entity ents[], int ents_sz, int n_steps, float dt, const char *
 
     // Initial positions
     for (size_t i = 0; i < ents_sz; i++) {
-        fprintf(fpt, "%lu,%lf,%lf,%lf,%lf\n", i,
-                ents[i].pos.x, ents[i].pos.y,
+        fprintf(fpt, "%lu,%lf,%lf,%lf,%lf\n", i, ents[i].pos.x, ents[i].pos.y,
                 ents[i].pos.z, ents[i].mass);
     }
 
-#   pragma omp parallel num_threads(thread_count)
+#pragma omp parallel num_threads(thread_count)
     {
-    init_mutex(&tree);
-    get_bounding_box(ents, ents_sz, &tree.max, loc_max);
-    add_ents(&tree, ents, ents_sz);
-    center_of_mass(&tree);
-    get_acceleration(&tree, acc, ents_sz);
-
-    for (int t = 0; t < n_steps; t++) {
-        // 1/2 kick
-#       pragma omp for
-        for (int i = 0; i < ents_sz; i++) {
-            ents[i].vel.x += acc[i].x * dt / 2.0;
-            ents[i].vel.y += acc[i].y * dt / 2.0;
-            ents[i].vel.z += acc[i].z * dt / 2.0;
-        }
-
-        // Move bodies
-#       pragma omp for
-        for (int i = 0; i < ents_sz; i++) {
-            ents[i].pos.x += ents[i].vel.x * dt;
-            ents[i].pos.y += ents[i].vel.y * dt;
-            ents[i].pos.z += ents[i].vel.z * dt;
-        }
-
-#       pragma omp single
-        for (int i = 0; i < ents_sz; i++) {
-            fprintf(fpt, "%d,%lf,%lf,%lf,%lf\n", i,
-                        ents[i].pos.x, ents[i].pos.y,
-                        ents[i].pos.z, ents[i].mass);
-        }
-
-        // Build new tree
-        //TODO think a strategy to reuse mutex without destroying and recreating them
-        //destroy_mutex(&tree);
-
-#       pragma omp single
-        {
-        tree.firstfree=tree.root;
-        tree.max = 0.0;
-        init_node(&tree);
-        }
-
+        init_mutex(&tree);
         get_bounding_box(ents, ents_sz, &tree.max, loc_max);
         add_ents(&tree, ents, ents_sz);
         center_of_mass(&tree);
         get_acceleration(&tree, acc, ents_sz);
 
-        // 2nd 1/2 kick
-#       pragma omp for
-        for (int i = 0; i < ents_sz; i++) {
-            ents[i].vel.x += acc[i].x * dt / 2.0;
-            ents[i].vel.y += acc[i].y * dt / 2.0;
-            ents[i].vel.z += acc[i].z * dt / 2.0;
+        for (int t = 0; t < n_steps; t++) {
+            // 1/2 kick
+#pragma omp for
+            for (int i = 0; i < ents_sz; i++) {
+                ents[i].vel.x += acc[i].x * dt / 2.0;
+                ents[i].vel.y += acc[i].y * dt / 2.0;
+                ents[i].vel.z += acc[i].z * dt / 2.0;
+            }
+
+            // Move bodies
+#pragma omp for
+            for (int i = 0; i < ents_sz; i++) {
+                ents[i].pos.x += ents[i].vel.x * dt;
+                ents[i].pos.y += ents[i].vel.y * dt;
+                ents[i].pos.z += ents[i].vel.z * dt;
+            }
+
+#pragma omp single
+            for (int i = 0; i < ents_sz; i++) {
+                fprintf(fpt, "%d,%lf,%lf,%lf,%lf\n", i, ents[i].pos.x,
+                        ents[i].pos.y, ents[i].pos.z, ents[i].mass);
+            }
+
+            // Build new tree
+#pragma omp single
+            {
+                tree.firstfree = tree.root;
+                tree.max = 0.0;
+                init_node(&tree);
+            }
+
+            get_bounding_box(ents, ents_sz, &tree.max, loc_max);
+            add_ents(&tree, ents, ents_sz);
+            center_of_mass(&tree);
+            get_acceleration(&tree, acc, ents_sz);
+
+            // 2nd 1/2 kick
+#pragma omp for
+            for (int i = 0; i < ents_sz; i++) {
+                ents[i].vel.x += acc[i].x * dt / 2.0;
+                ents[i].vel.y += acc[i].y * dt / 2.0;
+                ents[i].vel.z += acc[i].z * dt / 2.0;
+            }
+            get_energy(ents, ents_sz, KE + t, PE + t, local_KE, local_PE);
         }
-        get_energy(ents, ents_sz, KE+t, PE+t, local_KE, local_PE);
-    }
-    destroy_mutex(&tree);
+        destroy_mutex(&tree);
     } // pragma
 
     fclose(fpt);
@@ -663,7 +667,10 @@ int main(int argc, char *argv[]) {
     struct timespec s, e;
 
     if (argc != 7) {
-        fprintf(stderr, "Usage: %s input_filename start_time end_time delta_time output_filename THREADS_NUM\n", argv[0]);
+        fprintf(stderr,
+                "Usage: %s input_filename start_time end_time delta_time "
+                "output_filename THREADS_NUM\n",
+                argv[0]);
         return 1;
     }
 
