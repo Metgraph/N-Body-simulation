@@ -308,7 +308,7 @@ void add_ent(Octtree *tree, Entity *ent, int id) {
                 tree->nodes[id].mass = ent->mass;
                 tree->nodes[id].ents = 1;
 
-// set the leaves as branch children
+                // set the leaves as branch children
 #pragma omp atomic write
                 node->children[body_pos] = id;
 #pragma omp atomic write
@@ -318,7 +318,7 @@ void add_ent(Octtree *tree, Entity *ent, int id) {
 
                 allocated = 1;
             } else { // Descend into the tree
-// The current node will have one more body in its subtree
+                // The current node will have one more body in its subtree
 #pragma omp atomic update
                 tree->nodes[node_indx].ents++;
                 omp_unset_lock(&node->writelocks[body_pos]);

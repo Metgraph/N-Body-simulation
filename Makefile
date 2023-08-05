@@ -35,6 +35,10 @@ parallelfordebug:
 	${COMPILER} -Wall -g -o ${BUILD_DIR}/parallel_for_d openmp/parallel_for.c -lm -fopenmp
 
 barneshut:
+	${COMPILER} -Wall -o ${BUILD_DIR}/barnes-hut serial/barnes-hut.c -lm
+	${COMPILER} -Wall -o ${BUILD_DIR}/barnes-hut-omp openmp/barnes-hut.c -lm -fopenmp
+
+barneshutdebug:
 	${COMPILER} -Wall -g -o ${BUILD_DIR}/barnes-hut serial/barnes-hut.c -lm
 	${COMPILER} -Wall -g -o ${BUILD_DIR}/barnes-hut-omp openmp/barnes-hut.c -lm -fopenmp
 
