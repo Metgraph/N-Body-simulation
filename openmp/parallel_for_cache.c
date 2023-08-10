@@ -1,8 +1,8 @@
-// https://en.wikipedia.org/wiki/N-body_simulation
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <omp.h>
 
 #define BILLION 1000000000.0
 
@@ -15,36 +15,38 @@ typedef struct {
 } RVec3;
 
 typedef struct {
+    // Levo le velocità da entity riducendo la grandezza della struct
+    // e riducendo di molto le cache miss
     RVec3 pos;
-    RVec3 vel;
     double mass;
 } Entity;
 
 // const double BIG_G = 6.67e-11;
 const double BIG_G = 1.0;
+int thread_count;
 
-void get_entities(char filename[], Entity **ents, uint *n_ents);
+void get_entities(char filename[], Entity **ents, RVec3 **vel, uint *n_ents);
 void count_entities_file(char *filename, uint *n);
-void propagation(Entity ents[], uint ents_sz, int n_steps, float dt,
+void propagation(Entity ents[], RVec3 *vel, uint ents_sz, int n_steps, float dt,
                  const char *output);
 void acceleration(uint ents_sz, Entity *ents, RVec3 *acc);
 
 int main(int argc, char *argv[]) {
-    if (argc != 6) {
-        fprintf(stderr,
-                "Usage: %s input_filename start_time end_time delta_time "
-                "output_filename\n",
-                argv[0]);
+    if (argc != 7) {
+        fprintf(stderr, "Usage: %s input_filename start_time end_time delta_time output_filename THREADS_NUM\n", argv[0]);
         exit(1);
     }
 
+    thread_count = atoi(argv[6]);
+
     uint n_ents;
     Entity *ents;
+    RVec3 *vel;
     float start, end, dt;
     int n_steps;
     struct timespec s, e;
 
-    get_entities(argv[1], &ents, &n_ents);
+    get_entities(argv[1], &ents, &vel, &n_ents);
 
     start = strtof(argv[2], NULL);
     end = strtof(argv[3], NULL);
@@ -53,11 +55,11 @@ int main(int argc, char *argv[]) {
     n_steps = (end - start) / dt;
 
     printf("Start: %f, end: %f, delta time: %f, time steps: %d, ents: %d, G: "
-           "%lf\n",
-           start, end, dt, n_steps, n_ents, BIG_G);
+           "%lf, threads: %d\n",
+           start, end, dt, n_steps, n_ents, BIG_G, thread_count);
 
     clock_gettime(CLOCK_REALTIME, &s);
-    propagation(ents, n_ents, n_steps, dt, argv[5]);
+    propagation(ents, vel, n_ents, n_steps, dt, argv[5]);
     clock_gettime(CLOCK_REALTIME, &e);
 
     printf("Completed. Output file: %s\n", argv[5]);
@@ -100,9 +102,10 @@ void count_entities_file(char *filename, uint *n) {
 /**
  * Read file and generate an array of Entity
  */
-void get_entities(char filename[], Entity **ents, uint *n_ents) {
+void get_entities(char filename[], Entity **ents, RVec3 **vel, uint *n_ents) {
     Entity e_buff;
     Entity *ret_ptr;
+    RVec3 *vel_p;
     FILE *file;
 
     count_entities_file(filename, n_ents);
@@ -119,11 +122,19 @@ void get_entities(char filename[], Entity **ents, uint *n_ents) {
         exit(2);
     }
 
+    *vel = malloc(*n_ents * sizeof(Entity));
+    if (*vel == NULL) {
+        fprintf(stderr, "Error during memory allocation\n");
+        exit(3);
+    }
+
     ret_ptr = *ents;
+    vel_p = *vel;
     while ((fscanf(file, "%lf, %lf, %lf, %lf, %lf, %lf, %lf\n", &e_buff.pos.x,
-                   &e_buff.pos.y, &e_buff.pos.z, &e_buff.vel.x, &e_buff.vel.y,
-                   &e_buff.vel.z, &e_buff.mass)) == 7) {
+                   &e_buff.pos.y, &e_buff.pos.z, &vel_p->x, &vel_p->y,
+                   &vel_p->z, &e_buff.mass)) == 7) {
         *ret_ptr++ = e_buff;
+        vel_p++;
     }
     // check if while ended because the end of the file has been reached
     if (fgetc(file) != EOF) {
@@ -140,11 +151,17 @@ void get_entities(char filename[], Entity **ents, uint *n_ents) {
 
 void acceleration(uint ents_sz, Entity *ents, RVec3 *acc) {
 
+#   pragma omp for
     for (size_t m1 = 0; m1 < ents_sz; m1++) {
+        /* printf("Thread %d calculate m: %lu\n", omp_get_thread_num(), m1); */
+        // Per false sharing: acc è condivisa tra tutti i thread allora
+        // decido di scriverci una sola volta per thread solo alla
+        // fine dei calcoli
+        RVec3 local_acc;
 
-        acc[m1].x = 0;
-        acc[m1].y = 0;
-        acc[m1].z = 0;
+        local_acc.x = 0;
+        local_acc.y = 0;
+        local_acc.z = 0;
 
         for (size_t m2 = 0; m2 < ents_sz; m2++) {
             RVec3 r_vector;
@@ -157,14 +174,17 @@ void acceleration(uint ents_sz, Entity *ents, RVec3 *acc) {
                             r_vector.z * r_vector.z + 0.01;
             inv_r3 = pow(inv_r3, -1.5);
 
-            acc[m1].x += BIG_G * r_vector.x * inv_r3 * ents[m2].mass;
-            acc[m1].y += BIG_G * r_vector.y * inv_r3 * ents[m2].mass;
-            acc[m1].z += BIG_G * r_vector.z * inv_r3 * ents[m2].mass;
+            local_acc.x += BIG_G * r_vector.x * inv_r3 * ents[m2].mass;
+            local_acc.y += BIG_G * r_vector.y * inv_r3 * ents[m2].mass;
+            local_acc.z += BIG_G * r_vector.z * inv_r3 * ents[m2].mass;
         }
+        acc[m1].x = local_acc.x;
+        acc[m1].y = local_acc.y;
+        acc[m1].z = local_acc.z;
     }
 }
 
-void propagation(Entity *ents, uint ents_sz, int n_steps, float dt,
+void propagation(Entity *ents, RVec3 *vel, uint ents_sz, int n_steps, float dt,
                  const char *output) {
     FILE *fpt;
     RVec3 *acc;
@@ -175,10 +195,11 @@ void propagation(Entity *ents, uint ents_sz, int n_steps, float dt,
         exit(2);
     }
 
-    // Initial acceleration
-    acceleration(ents_sz, ents, acc);
-
     fpt = fopen(output, "w");
+
+    // Initial acceleration
+#   pragma omp parallel num_threads(thread_count) // Fork unico
+    acceleration(ents_sz, ents, acc);
 
     // Print to file initial state
     for (size_t i = 0; i < ents_sz; i++) {
@@ -187,38 +208,57 @@ void propagation(Entity *ents, uint ents_sz, int n_steps, float dt,
                 ents[i].pos.z, ents[i].mass);
     }
 
+    // Con il for unico e utilizzando omp for invece di omp parallel for
+    // Vengono forkati i thread solo all'inizio del ciclo e riutilizzati
+    // invece di avere un fork ad ogni for
+#   pragma omp parallel num_threads(thread_count)
     for (int t = 0; t < n_steps; t++) {
 
         // First 1/2 kick
+#       pragma omp for
         for (size_t i = 0; i < ents_sz; i++) {
-            ents[i].vel.x += acc[i].x * dt / 2.0;
-            ents[i].vel.y += acc[i].y * dt / 2.0;
-            ents[i].vel.z += acc[i].z * dt / 2.0;
+            vel[i].x += acc[i].x * dt / 2.0;
+            vel[i].y += acc[i].y * dt / 2.0;
+            vel[i].z += acc[i].z * dt / 2.0;
         }
 
         // Move bodies
+#       pragma omp for
         for (size_t i = 0; i < ents_sz; i++) {
-            ents[i].pos.x += ents[i].vel.x * dt;
-            ents[i].pos.y += ents[i].vel.y * dt;
-            ents[i].pos.z += ents[i].vel.z * dt;
+            ents[i].pos.x += vel[i].x * dt;
+            ents[i].pos.y += vel[i].y * dt;
+            ents[i].pos.z += vel[i].z * dt;
+        }
 
-            // Save positions
+        // Save positions
+        // Il primo thread che arriva lo esegue, nowait senza barriera
+        // Non mi preoccupo di scrittura di dati svagliati perchè ogni blocco
+        // ha una barriera implicita alla sua fine e la prossima istruzione
+        // è accelerations che oltre a modificare le accelerazioni (che qui non servono)
+        // non ha altri side effects
+#       pragma omp single nowait
+        for (size_t i = 0; i < ents_sz; i++) {
+            //printf("Write file thread: %d\n", omp_get_thread_num());
+
             fprintf(fpt, "%lu,%lf,%lf,%lf,%lf\n", i,
-                    ents[i].pos.x, ents[i].pos.y,
-                    ents[i].pos.z, ents[i].mass);
+                ents[i].pos.x, ents[i].pos.y,
+                ents[i].pos.z, ents[i].mass);
         }
 
         // Update accelerations
         acceleration(ents_sz, ents, acc);
 
         // Second 1/2 kick
-        for (size_t m1 = 0; m1 < ents_sz; m1++) {
-            ents[m1].vel.x += acc[m1].x * dt / 2.0;
-            ents[m1].vel.y += acc[m1].y * dt / 2.0;
-            ents[m1].vel.z += acc[m1].z * dt / 2.0;
+#       pragma omp for
+        for (size_t i = 0; i < ents_sz; i++) {
+            //printf("Thread %d\n", omp_get_thread_num());
+            vel[i].x += acc[i].x * dt / 2.0;
+            vel[i].y += acc[i].y * dt / 2.0;
+            vel[i].z += acc[i].z * dt / 2.0;
         }
     }
     fclose(fpt);
     free(acc);
 }
+
 

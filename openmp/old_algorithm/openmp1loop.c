@@ -81,61 +81,54 @@ uint get_entities(char filename[], Entity **ents)
 void propagation(Entity ents[], uint ents_sz, size_t t_start, size_t t_end, size_t dt, const char *output)
 {
 	FILE *fpt;
+	// size_t t = t_start;
 
-	// alloc and initialize all value to 0 (0 in floating point is represented by all 0)
-	RVec3 *a_g = (RVec3*)calloc(ents_sz, sizeof(RVec3));
 	fpt = fopen(output, "w");
-	for (size_t t = t_start; t < t_end; t += dt)
+	for(size_t t = t_start; t<t_end; t+=dt)
 	{
-#pragma omp parallel
+        #pragma omp parallel for
+		for (size_t m1_idx = 0; m1_idx < ents_sz; m1_idx++)
 		{
-#pragma omp for collapse(2)
-			for (size_t m1_idx = 0; m1_idx < ents_sz; m1_idx++)
+			RVec3 a_g = {0, 0, 0};
+			for (size_t m2_idx = 0; m2_idx < ents_sz; m2_idx++)
 			{
-
-				for (size_t m2_idx = 0; m2_idx < ents_sz; m2_idx++)
+				if (m2_idx != m1_idx)
 				{
-					if (m2_idx != m1_idx)
-					{
-						RVec3 r_vector;
+					RVec3 r_vector;
 
-						r_vector.x = ents[m1_idx].pos.x - ents[m2_idx].pos.x;
-						r_vector.y = ents[m1_idx].pos.y - ents[m2_idx].pos.y;
-						r_vector.z = ents[m1_idx].pos.z - ents[m2_idx].pos.z;
+					r_vector.x = ents[m1_idx].pos.x - ents[m2_idx].pos.x;
+					r_vector.y = ents[m1_idx].pos.y - ents[m2_idx].pos.y;
+					r_vector.z = ents[m1_idx].pos.z - ents[m2_idx].pos.z;
 
-						double r_mag = sqrt(r_vector.x * r_vector.x + r_vector.y * r_vector.y + r_vector.z * r_vector.z);
+					double r_mag = sqrt(r_vector.x * r_vector.x + r_vector.y * r_vector.y + r_vector.z * r_vector.z);
 
-						double acceleration = -1.0 * BIG_G * (ents[m2_idx].mass) / pow(r_mag, 2.0);
+					double acceleration = -1.0 * BIG_G * (ents[m2_idx].mass) / pow(r_mag, 2.0);
 
-						RVec3 r_unit_vector = {r_vector.x / r_mag, r_vector.y / r_mag, r_vector.z / r_mag};
+					RVec3 r_unit_vector = {r_vector.x / r_mag, r_vector.y / r_mag, r_vector.z / r_mag};
 
-						a_g[m1_idx].x += acceleration * r_unit_vector.x;
-						a_g[m1_idx].y += acceleration * r_unit_vector.y;
-						a_g[m1_idx].z += acceleration * r_unit_vector.z;
-					}
+					a_g.x += acceleration * r_unit_vector.x;
+					a_g.y += acceleration * r_unit_vector.y;
+					a_g.z += acceleration * r_unit_vector.z;
 				}
 			}
 
-#pragma omp for
-			for (size_t m_idx = 0; m_idx < ents_sz; m_idx++)
-			{
-				ents[m_idx].vel.x += a_g[m_idx].x * dt;
-				ents[m_idx].vel.y += a_g[m_idx].y * dt;
-				ents[m_idx].vel.z += a_g[m_idx].z * dt;
-				ents[m_idx].pos.x += ents[m_idx].vel.x * dt;
-				ents[m_idx].pos.y += ents[m_idx].vel.y * dt;
-				ents[m_idx].pos.z += ents[m_idx].vel.z * dt;
-			}
+			ents[m1_idx].vel.x += a_g.x * dt;
+			ents[m1_idx].vel.y += a_g.y * dt;
+			ents[m1_idx].vel.z += a_g.z * dt;
 		}
 
 		for (size_t entity_idx = 0; entity_idx < ents_sz; entity_idx++)
 		{
-			fprintf(fpt, "%u,%lf,%lf,%lf,%lf,%lf,%lf \n", entity_idx, ents[entity_idx].pos.x,
-					ents[entity_idx].pos.y, ents[entity_idx].pos.z, ents[entity_idx].vel.x, ents[entity_idx].vel.y,
-					ents[entity_idx].vel.z);
+			ents[entity_idx].pos.x += ents[entity_idx].vel.x * dt;
+			ents[entity_idx].pos.y += ents[entity_idx].vel.y * dt;
+			ents[entity_idx].pos.z += ents[entity_idx].vel.z * dt;
+			fprintf(fpt, "%lu,%lf,%lf,%lf,%lf,%lf,%lf\n", entity_idx, ents[entity_idx].pos.x,
+            ents[entity_idx].pos.y, ents[entity_idx].pos.z, ents[entity_idx].vel.x,ents[entity_idx].vel.y,
+            ents[entity_idx].vel.z);
 		}
+
+		// t += dt;
 	}
-	free(a_g);
 	fclose(fpt);
 }
 
