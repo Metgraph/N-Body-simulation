@@ -10,7 +10,8 @@ typedef unsigned int uint;
 
 #define BILLION 1000000000.0
 
-__constant__ double BIG_G = 6.67e-11; // Nella read-only cache e condivisa dai thread del blocco
+//__constant__ double BIG_G = 6.67e-11; // Nella read-only cache e condivisa dai thread del blocco
+__constant__ double BIG_G = 1.0; // Nella read-only cache e condivisa dai thread del blocco
 
 __host__ void get_entities(char filename[], uint *n_ents, double **positions, double **velocities);
 __host__ void count_entities_file(char *filename, uint *n);
@@ -18,14 +19,20 @@ __global__ void acceleration(double *positions, double *acc, uint ents_sz, int s
 __host__ void safe_malloc_double(double **pointer, int quantity);
 __global__ void update_positions(double *positions, double *velocities, uint ents_sz, double dt, int step);
 __global__ void update_velocities(double *acc, double *vel, uint ents_sz, double dt);
-__host__ void run(double *positions, double *velocities, uint ents_sz, int n_steps, size_t dt, const char *output);
+__host__ void run(double *positions, double *velocities, uint ents_sz, int n_steps, double dt, const char *output);
+
+uint grid_s;
+uint block_s;
 
 
 int main(int argc, char *argv[]) {
-    if (argc != 6) {
-        fprintf(stderr, "Usage: %s input_filename start_time end_time delta_time output_filename\n", argv[0]);
+    if (argc < 8) {
+        fprintf(stderr, "Usage: %s input_filename start_time end_time delta_time output_filename grid_size block_size\n", argv[0]);
         exit(1);
     }
+
+    grid_s = atoi(argv[6]);
+    block_s = atoi(argv[7]);
 
     uint n_ents;
     float start, end, dt;
@@ -75,12 +82,21 @@ void calculate_block_dim() {
 }
 
 __host__
-void run(double *h_positions, double *h_velocities, uint ents_sz, int n_steps, size_t dt, const char *output) {
+void run(double *h_positions, double *h_velocities, uint ents_sz, int n_steps, double dt, const char *output) {
     FILE *fpt;
     cudaError_t error;
     double *d_positions;
     double *d_velocities;
     double *d_accelerations;
+
+    dim3 grid(grid_s, 1, 1);
+    dim3 block(block_s, 1, 1);
+    int shsz = block.x; // Shared memory size
+
+    if (block_s * grid_s < ents_sz) {
+        fprintf(stderr, "Insufficent threads!\nTotal cuda threads requested: %d - Total bodies: %d\n", block_s * grid_s, ents_sz);
+        exit(1);
+    }
 
     error = cudaMalloc((void **)&d_positions, ents_sz * 4 * sizeof(double) * n_steps + 1);
     cuda_check_error(error, "Device positions malloc\n");
@@ -98,20 +114,20 @@ void run(double *h_positions, double *h_velocities, uint ents_sz, int n_steps, s
     cuda_check_error(error, "Host to Device copy velocities\n");
 
     fpt = fopen(output, "w");
-    acceleration<<<1, 9, 9 * sizeof(double) * 4>>>(d_positions, d_accelerations, ents_sz, 0);
+    acceleration<<<grid, block, shsz * sizeof(double) * 4>>>(d_positions, d_accelerations, ents_sz, 0);
 
     for (int t = 1; t <= n_steps; t++) {
 
-        update_velocities<<<1, 50>>>(d_accelerations, d_velocities, ents_sz, dt);
+        update_velocities<<<grid, block>>>(d_accelerations, d_velocities, ents_sz, dt);
         cudaDeviceSynchronize();
 
-        update_positions<<<1, 50>>>(d_positions, d_velocities, ents_sz, dt, t);
+        update_positions<<<grid, block>>>(d_positions, d_velocities, ents_sz, dt, t);
         cudaDeviceSynchronize();
 
-        acceleration<<<1, 50, 50 * sizeof(double) * 4>>>(d_positions, d_accelerations, ents_sz, t);
+        acceleration<<<grid, block, shsz * sizeof(double) * 4>>>(d_positions, d_accelerations, ents_sz, t);
         cudaDeviceSynchronize();
 
-        update_velocities<<<1, 50>>>(d_accelerations, d_velocities, ents_sz, dt);
+        update_velocities<<<grid, block>>>(d_accelerations, d_velocities, ents_sz, dt);
         cudaDeviceSynchronize();
     }
 
