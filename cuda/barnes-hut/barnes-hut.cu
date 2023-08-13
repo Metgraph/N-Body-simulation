@@ -266,34 +266,26 @@ void add_ent(Octtree *tree, double4 *ents, int ents_sz) {
             // Con l'esecuzione parallela delle istruzioni dei thread in un warp
             // nessuno riesce a passare oltre il while.
             if (atomicCAS(&tree->mutex[i], 0, 1) == 0) {
-                __threadfence();
-                //set_lock(tree, i);
+                // __threadfence(); -> inutile
+
                 //omp_set_lock(&node->writelocks[body_pos]);
                 //printf("Thread %d gain lock for node: %d child: %d, border size: %lf\n", myId, node_indx, body_pos, border_size);
 
                 if (tree->children[i] == -1) {
-                    atomicExch(&tree->children[i], myId); // Scrivo sul nodo chi è il figlio
+                    //atomicExch(&tree->children[i], myId); // Scrivo sul nodo chi è il figlio
+                    tree->children[i] = myId;
                     atomicAdd(&tree->ents[node_indx], 1); // Aggiorno la quantità di entità
 
                     tree->node_pos[myId] = ent; // Copio i dati del corpo sul nodo libero
-                    //tree->node_pos[myId].x = -myId;
-                    //tree->node_pos[myId].y = -myId;
-                    //tree->node_pos[myId].z = body_pos;
 
                     tree->ents[myId] = 1; // Aggiorno il numero di entità sulla foglia
                     tree->parent[myId] = node_indx; // Sistemo il padre della foglia
                     //printf("Thread %d body POSIZIONATO SU LIBERO %d child %d: x: %lf, y: %lf, z: %lf, mass: %lf\n", myId, node_indx, body_pos, tree->node_pos[myId].x, tree->node_pos[myId].y, tree->node_pos[myId].z, tree->node_pos[myId].w);
 
-                    /*
-                    tree->nodes[myId].center = ent->pos;
-                    tree->nodes[myId].mass = ent->mass;
-                    tree->nodes[myId].ents = 1;
-                    tree->nodes[myId].parent = node_indx;
-                    */
-
                     allocated = 1;
                     //omp_unset_lock(&node->writelocks[body_pos]);
-                    atomicExch(&tree->mutex[i], 0);
+                    //atomicExch(&tree->mutex[i], 0);
+                    tree->mutex[i] = 0;
                     __threadfence();
                 } else {
                     // if the location is occupied by a body-leaf
@@ -326,8 +318,11 @@ void add_ent(Octtree *tree, double4 *ents, int ents_sz) {
                             tree->parent[free] = node_indx;
 
                             // set the new node as child
-                            atomicExch(&tree->children[node_indx * 8 + body_pos], free);
-                            atomicExch(&tree->ents[free], 2);
+                            //atomicExch(&tree->children[node_indx * 8 + body_pos], free);
+                            //atomicExch(&tree->ents[free], 2);
+
+                            tree->children[node_indx * 8 + body_pos] = free;
+                            tree->ents[free] = 2;
 
                             // get leaves position in the new branch
                             int old_body_pos = body_pos;
@@ -340,21 +335,20 @@ void add_ent(Octtree *tree, double4 *ents, int ents_sz) {
                             prev_node_indx = node_indx;
                             node_indx = free;
                             //omp_set_lock(&tree->nodes[node_indx].writelocks[body_pos]);
-                            //set_lock(tree, (node_indx * 8 + body_pos));
 
                             // Il nodo è nuovo, nessuno può averlo lockato finche non rilascio
                             // il lock al nodo padre
-                            atomicCAS(&tree->mutex[node_indx*8+body_pos], 0, 1);
+                            //atomicCAS(&tree->mutex[node_indx*8+body_pos], 0, 1);
+                            tree->mutex[node_indx*8+body_pos] = 1;
                             if (other_indx != body_pos) {
                                 //omp_set_lock( &tree->nodes[node_indx].writelocks[other_indx]);
-                                //set_lock(tree, (node_indx * 8 + other_indx));
-                                atomicCAS(&tree->mutex[node_indx*8+other_indx], 0, 1);
+                                //atomicCAS(&tree->mutex[node_indx*8+other_indx], 0, 1);
+                                tree->mutex[node_indx*8+other_indx] = 1;
                             }
                             //omp_unset_lock(&node->writelocks[old_body_pos]);
-                            //unset_lock(tree, (prev_node_indx * 8 + old_body_pos));
-                            atomicExch(&tree->mutex[prev_node_indx*8+old_body_pos], 0);
+                            //atomicExch(&tree->mutex[prev_node_indx*8+old_body_pos], 0);
+                            tree->mutex[prev_node_indx*8+old_body_pos] = 0;
                             __threadfence();
-                            //node = &tree->nodes[node_indx];
                         }
 
                         // set new parent in the leaves values
@@ -363,24 +357,19 @@ void add_ent(Octtree *tree, double4 *ents, int ents_sz) {
 
                         tree->ents[myId] = 1;
                         tree->node_pos[myId] = ent;
-                        //tree->node_pos[myId].x = myId;
-                        //tree->node_pos[myId].y = myId;
-                        //tree->node_pos[myId].z = body_pos;
 
                         // set the leaves as branch children
-                        atomicExch(&tree->children[node_indx * 8 + body_pos], myId);
-                        atomicExch(&tree->children[node_indx * 8 + other_indx], other_id);
-
-                        //omp_unset_lock(&node->writelocks[body_pos]);
-                        //omp_unset_lock(&node->writelocks[other_indx]);
-                        //unset_lock(tree, (node_indx * 8 + body_pos));
-                        //unset_lock(tree, (node_indx * 8 + other_indx));
-
+                        //atomicExch(&tree->children[node_indx * 8 + body_pos], myId);
+                        //atomicExch(&tree->children[node_indx * 8 + other_indx], other_id);
+                        tree->children[node_indx * 8 + body_pos] = myId;
+                        tree->children[node_indx * 8 + other_indx] = other_id;
 
                         ////printf("Thread %d body POSIZIONATO SU FONDO: x: %lf, y: %lf, z: %lf, mass: %lf\n", myId, tree->node_pos[myId].x, tree->node_pos[myId].y, tree->node_pos[myId].z, tree->node_pos[myId].w);
                         //printf("Thread %d riposizionati body: my=%d - other=%d\n", myId, myId, other_id);
-                        atomicExch(&tree->mutex[node_indx*8+body_pos], 0);
-                        atomicExch(&tree->mutex[node_indx*8+other_indx], 0);
+                        //atomicExch(&tree->mutex[node_indx*8+body_pos], 0);
+                        //atomicExch(&tree->mutex[node_indx*8+other_indx], 0);
+                        tree->mutex[node_indx*8+body_pos] = 0;
+                        tree->mutex[node_indx*8+other_indx] = 0;
                         __threadfence();
 
                         allocated = 1;
@@ -388,13 +377,12 @@ void add_ent(Octtree *tree, double4 *ents, int ents_sz) {
                         // The current node will have one more body in its subtree
                         atomicAdd(&tree->ents[node_indx], 1);
                         //omp_unset_lock(&node->writelocks[body_pos]);
-                        //unset_lock(tree, i);
                         atomicExch(&tree->mutex[i], 0);
-                        __threadfence();
+                        //__threadfence();
+
                         // cross the branch
                         //printf("Thread %d lascia %d attraversa verso %d\n", myId, i, body_pos);
                         node_indx = tree->children[node_indx * 8 + body_pos];
-                        //node = &tree->nodes[node_indx];
                     }
                 }
             } else {
