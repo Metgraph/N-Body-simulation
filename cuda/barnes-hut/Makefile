@@ -1,4 +1,4 @@
-objects = bh.o bh_tree.o
+objects = barnes-hut.o bh_tree.o
 
 all: $(objects)
 	nvcc -Werror all-warnings $(objects) -o bh
