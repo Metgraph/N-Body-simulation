@@ -48,6 +48,13 @@ void init_tree(Octtree **tree, int ents_sz, double4 **pos, int **ents, int **par
 }
 
 __host__
+void reset_mutex(int *mutex, int ents_sz) {
+    cudaError_t error;
+    error = cudaMemset(mutex, 0, ents_sz * sizeof(int) * 8 * PRE_ALLOC_SIZE);
+    cuda_check_error(error, "Reset mutex memset\n");
+}
+
+__host__
 void free_tree(Octtree **tree, int ents_sz, double4 **pos, int **ents, int **parent, int **children, int **mutex) {
     cudaFree(*tree);
     cudaFree(*pos);

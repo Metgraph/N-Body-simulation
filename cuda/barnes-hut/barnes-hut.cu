@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <math.h>
 #include "barnes-hut.cuh"
 
 typedef unsigned int uint;
@@ -85,6 +86,20 @@ void print_tree(Octtree *d_tree, int ents_sz, double4 *d_node_pos, int *d_childr
     free(space);
 }
 
+__global__
+void print_local(double *val, int ents_sz){
+    double max = val[0];
+    int pos = 0;
+    for (int i=0; i<ents_sz; i++) {
+        //printf("Val pos %d: %lf\n", i, val[i]);
+        if (val[i] > max){
+            max = val[i];
+            pos=i;
+        }
+    }
+    printf("Find max: %lf, %lf, POS: %d\n", max, max*2, pos);
+}
+
 
 __global__
 void get_bounding_box_fi(double *positions, int ents_sz, double *g_odata, int step)
@@ -118,17 +133,21 @@ void get_bounding_box_fi(double *positions, int ents_sz, double *g_odata, int st
     //printf("thread %d max %lf\n", myId, sdata[tid]);
     __syncthreads();
 
-    // Do reduction in shared memory
-    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1)
-    {
-        if (tid < s && sdata[tid + s] > sdata[tid]) {
-            sdata[tid] = sdata[tid + s];
+    if (myId < ents_sz) {
+        // Do reduction in shared memory
+        for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1)
+        {
+            if (s == 3)
+                s = 4;
+            if (tid < s && sdata[tid + s] > sdata[tid]) {
+                sdata[tid] = sdata[tid + s];
+            }
+            __syncthreads();
         }
-        __syncthreads();
-    }
-    // Write result for this block to global mem
-    if (tid == 0) {
-        g_odata[blockIdx.x] = sdata[0];
+        // Write result for this block to global mem
+        if (tid == 0) {
+            g_odata[blockIdx.x] = sdata[0];
+        }
     }
 }
 
@@ -139,37 +158,35 @@ void get_bounding_box(double *g_idata, int ents_sz, double *g_odata)
     // perform first level of reduction,
     // reading from global memory, writing to shared memory
     uint tid = threadIdx.x;
-    uint space = (blockDim.x);
-    // Each thread load 2 elements
-    uint i = (blockIdx.x * (blockDim.x * 2) + threadIdx.x);
-    double v1, v2;
+    int myId = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (i < ents_sz) {
-        v1 = fabs(g_idata[i]);
-
-        if (i + space < ents_sz) {
-            v2 = fabs(g_idata[i + space]);
-            sdata[tid] = v1 > v2 ? v1 : v2;
-        } else {
-            sdata[tid] = v1;
-        }
+    if (myId < ents_sz) {
+        sdata[tid] = g_idata[myId];
+        //printf("Tread %d insert %lf\n", myId, sdata[tid]);
     } else {
-        // If thread is outer than values set local max to 0
         sdata[tid] = 0;
     }
     __syncthreads();
 
     // Do reduction in shared memory
-    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1)
-    {
-        if (tid < s && sdata[tid + s] > sdata[tid]) {
-            sdata[tid] = sdata[tid + s];
+    if (myId < ents_sz) {
+        for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1)
+        {
+            // Se il blocco ha una dimensione che è multiplo di 3
+            // vengono saltate alcuni elementi, rimettendo la stride
+            // a 4 ci sarà una piccola sovrapposizione però si esaminano
+            // tutti gli elementi
+            if (s == 3)
+                s = 4;
+            if (tid < s && sdata[tid + s] > sdata[tid])  {
+                sdata[tid] = sdata[tid + s];
+            }
+            __syncthreads();
         }
-        __syncthreads();
-    }
-    // Write result for this block to global mem
-    if (tid == 0) {
-        g_odata[blockIdx.x] = sdata[0];
+        // Write result for this block to global mem
+        if (tid == 0) {
+            g_odata[blockIdx.x] = sdata[0];
+        }
     }
 }
 
@@ -192,15 +209,16 @@ void bounding_box(double *positions, double *max_in, double *max_out, int ents_s
     // Trova il massimo tra i massimi
     double *temp;
     int ents = ents_sz;
-    int grid_size = grid_s;
+    int grid_size = ceil((float)ents / (float)block.x);
+    grid.x = grid_size;
 
     // Ad ogni iterazione per trovare il massimo rimangono un numero di elementi
     // pari a quello del numero dei blocchi.
     while(ents > 1) {
-        get_bounding_box<<<grid, block, shsz * sizeof(double)>>>(max_in, ents_sz, max_out);
+        get_bounding_box<<<grid_size, block, shsz * sizeof(double)>>>(max_in, ents, max_out);
         cudaDeviceSynchronize();
         // Prendo le misure per la prossima iterazione
-        ents = grid.x;
+        ents = grid_size;
         grid_size = ceil((float) grid.x / (float) block.x);
 
         grid.x = grid_size;
@@ -245,7 +263,6 @@ void add_ent(Octtree *tree, double4 *ents, int ents_sz) {
     int myId = threadIdx.x + blockIdx.x * blockDim.x;
     if (myId < ents_sz) {
         double4 ent = ents[myId];
-        //printf("Thread %d body: x: %lf, y: %lf, z: %lf, mass: %lf\n", myId, ent.x, ent.y, ent.z, ent.w);
         // set init value
         allocated = 0;
         // keep last visited node index
@@ -266,13 +283,8 @@ void add_ent(Octtree *tree, double4 *ents, int ents_sz) {
             // Con l'esecuzione parallela delle istruzioni dei thread in un warp
             // nessuno riesce a passare oltre il while.
             if (atomicCAS(&tree->mutex[i], 0, 1) == 0) {
-                // __threadfence(); -> inutile
-
-                //omp_set_lock(&node->writelocks[body_pos]);
-                //printf("Thread %d gain lock for node: %d child: %d, border size: %lf\n", myId, node_indx, body_pos, border_size);
 
                 if (tree->children[i] == -1) {
-                    //atomicExch(&tree->children[i], myId); // Scrivo sul nodo chi è il figlio
                     tree->children[i] = myId;
                     atomicAdd(&tree->ents[node_indx], 1); // Aggiorno la quantità di entità
 
@@ -280,29 +292,23 @@ void add_ent(Octtree *tree, double4 *ents, int ents_sz) {
 
                     tree->ents[myId] = 1; // Aggiorno il numero di entità sulla foglia
                     tree->parent[myId] = node_indx; // Sistemo il padre della foglia
-                    //printf("Thread %d body POSIZIONATO SU LIBERO %d child %d: x: %lf, y: %lf, z: %lf, mass: %lf\n", myId, node_indx, body_pos, tree->node_pos[myId].x, tree->node_pos[myId].y, tree->node_pos[myId].z, tree->node_pos[myId].w);
 
                     allocated = 1;
-                    //omp_unset_lock(&node->writelocks[body_pos]);
-                    //atomicExch(&tree->mutex[i], 0);
                     tree->mutex[i] = 0;
                     __threadfence();
                 } else {
                     // if the location is occupied by a body-leaf
                     // [leaf, leaf, leaf, ..., root, branch, branch, ...]
                     if (tree->children[i] < tree->root) {
-                        //printf("Tread %d trovato occupato da %d\n", myId, tree->children[i]);
                         // other is the other leaf
                         double3 other_center = volume_center;
                         double other_border = border_size;
-                        //int other = node->children[body_pos];
                         int other_id = tree->children[i];
                         int other_indx = body_pos;
                         int prev_node_indx;
 
                         // Add new body to count in the current node
                         atomicAdd(&tree->ents[node_indx], 1);
-                        ////printf("Thread %d atomic add node %d ents %d\n", myId, node_indx, tree->ents[node_indx]);
 
                         // When the leaves will be in different position exit the loop
                         while (body_pos == other_indx) {
@@ -313,14 +319,10 @@ void add_ent(Octtree *tree, double4 *ents, int ents_sz) {
                             int free;
 
                             free = init_node(tree);
-                            //printf("Thread %d nodo %d inizializzato - parent %d\n", myId, free, node_indx);
                             // Imposto il padre della nuova foglia
                             tree->parent[free] = node_indx;
 
                             // set the new node as child
-                            //atomicExch(&tree->children[node_indx * 8 + body_pos], free);
-                            //atomicExch(&tree->ents[free], 2);
-
                             tree->children[node_indx * 8 + body_pos] = free;
                             tree->ents[free] = 2;
 
@@ -338,15 +340,10 @@ void add_ent(Octtree *tree, double4 *ents, int ents_sz) {
 
                             // Il nodo è nuovo, nessuno può averlo lockato finche non rilascio
                             // il lock al nodo padre
-                            //atomicCAS(&tree->mutex[node_indx*8+body_pos], 0, 1);
                             tree->mutex[node_indx*8+body_pos] = 1;
                             if (other_indx != body_pos) {
-                                //omp_set_lock( &tree->nodes[node_indx].writelocks[other_indx]);
-                                //atomicCAS(&tree->mutex[node_indx*8+other_indx], 0, 1);
                                 tree->mutex[node_indx*8+other_indx] = 1;
                             }
-                            //omp_unset_lock(&node->writelocks[old_body_pos]);
-                            //atomicExch(&tree->mutex[prev_node_indx*8+old_body_pos], 0);
                             tree->mutex[prev_node_indx*8+old_body_pos] = 0;
                             __threadfence();
                         }
@@ -359,15 +356,9 @@ void add_ent(Octtree *tree, double4 *ents, int ents_sz) {
                         tree->node_pos[myId] = ent;
 
                         // set the leaves as branch children
-                        //atomicExch(&tree->children[node_indx * 8 + body_pos], myId);
-                        //atomicExch(&tree->children[node_indx * 8 + other_indx], other_id);
                         tree->children[node_indx * 8 + body_pos] = myId;
                         tree->children[node_indx * 8 + other_indx] = other_id;
 
-                        ////printf("Thread %d body POSIZIONATO SU FONDO: x: %lf, y: %lf, z: %lf, mass: %lf\n", myId, tree->node_pos[myId].x, tree->node_pos[myId].y, tree->node_pos[myId].z, tree->node_pos[myId].w);
-                        //printf("Thread %d riposizionati body: my=%d - other=%d\n", myId, myId, other_id);
-                        //atomicExch(&tree->mutex[node_indx*8+body_pos], 0);
-                        //atomicExch(&tree->mutex[node_indx*8+other_indx], 0);
                         tree->mutex[node_indx*8+body_pos] = 0;
                         tree->mutex[node_indx*8+other_indx] = 0;
                         __threadfence();
@@ -376,9 +367,7 @@ void add_ent(Octtree *tree, double4 *ents, int ents_sz) {
                     } else { // Descend into the tree
                         // The current node will have one more body in its subtree
                         atomicAdd(&tree->ents[node_indx], 1);
-                        //omp_unset_lock(&node->writelocks[body_pos]);
                         atomicExch(&tree->mutex[i], 0);
-                        //__threadfence();
 
                         // cross the branch
                         //printf("Thread %d lascia %d attraversa verso %d\n", myId, i, body_pos);
@@ -386,7 +375,6 @@ void add_ent(Octtree *tree, double4 *ents, int ents_sz) {
                     }
                 }
             } else {
-                //printf("Thread %d lock is closed node: %d child: %d, borders size: %lf\n", myId, node_indx, body_pos, border_size);
                 // Se trovo lockato ripristino i valori a ingresso del loop
                 border_size *= 2;
                 volume_center = prev_vol;
@@ -396,14 +384,16 @@ void add_ent(Octtree *tree, double4 *ents, int ents_sz) {
 }
 
 __global__
-void center_of_mass(Octtree *tree, int ents_sz) {
+void center_of_mass(Octtree *tree, int ents_sz, int block) {
     int myId, myNode;
 
+    // The calculation of the centers of mass is done starting from
+    // the bottom and reaching up to the root of the tree.
     myId = blockIdx.x * blockDim.x + threadIdx.x;
     myNode = (tree->firstfree - 1) - myId;
 
     if (myNode >= ents_sz){
-        //printf("Thread %d: node: %d\n", myId, myNode);
+        //printf("Thread %d block %d: node: %d\n", myId, blockIdx.x, myNode);
         //Octnode *my_node = &tree->nodes[n];
         double new_mass, l_mass;
         double4 child;
@@ -417,18 +407,11 @@ void center_of_mass(Octtree *tree, int ents_sz) {
         l_mass = tree->node_pos[myNode].w;
 
         j = tree->children[myNode * 8 + counter];
-        if (myId == 0) {
-            for (int i=0; i<8;i++){
-                //printf("T0 child %d = %d, mass child: %lf\n", i, tree->children[myNode * 8 + i], tree->node_pos[tree->children[myNode*8+i]].w);
-            }
-        }
         while (counter < 8) {
             if (j == -1) {
                 counter++;
                 j = tree->children[myNode * 8 + counter];
             } else if (tree->node_pos[j].w != 0) {
-                //update_center_of_mass(&tree->nodes[j], &l_center, &l_new_mass);
-                //printf("Thread %d calculate child %d\n", myId, j);
                 child = tree->node_pos[j];
 
                 new_mass = l_mass + child.w;
@@ -438,21 +421,189 @@ void center_of_mass(Octtree *tree, int ents_sz) {
                 l_center.z = (child.z * child.w / new_mass) + (l_center.z * l_mass / new_mass);
                 l_mass = new_mass;
 
+                tree->mutex[j] = 0;
+
                 counter++;
                 j = tree->children[myNode * 8 + counter];
-                //printf("Thread %d counter: %d\n", myId, counter);
             }
-
             if (counter >= 8) {
-                //printf("Thread %d done\n", myId);
                 tree->node_pos[myNode].x = l_center.x;
                 tree->node_pos[myNode].y = l_center.y;
                 tree->node_pos[myNode].z = l_center.z;
                 tree->node_pos[myNode].w = l_mass;
+
                 __threadfence();
+                //printf("Thread %d done\n", myId);
             }
         }
     }
+}
+
+__global__
+void center_of_mass2(Octtree *tree, int ents_sz, int block) {
+    int myId, myNode;
+
+    // The calculation of the centers of mass is done starting from
+    // the bottom and reaching up to the root of the tree.
+    myId = blockIdx.x * blockDim.x + threadIdx.x;
+    myNode = (tree->firstfree - 1) - myId;
+
+    if (myNode >= ents_sz){
+        double new_mass, l_mass;
+        double4 child;
+        double3 l_center;
+        int j;
+        int counter = 0;
+        int buffer[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
+
+        l_center.x = tree->node_pos[myNode].x;
+        l_center.y = tree->node_pos[myNode].y;
+        l_center.z = tree->node_pos[myNode].z;
+        l_mass = tree->node_pos[myNode].w;
+
+        for (int i = 0; i <8; i++) {
+            j = tree->children[myNode * 8 + i];
+            //printf("Thread %d check node %d (child no: %d)\n", myId, j, i);
+            if (j != -1) { // Esiste il figlio
+                //printf("Thread %d node %d -> child node: %d\n", myId, myNode, j);
+                if (tree->node_pos[j].w != 0) {
+                    child = tree->node_pos[j];
+
+                    new_mass = l_mass + child.w;
+                    l_center.x = (child.x * child.w / new_mass) + (l_center.x * l_mass / new_mass);
+                    l_center.y = (child.y * child.w / new_mass) + (l_center.y * l_mass / new_mass);
+                    l_center.z = (child.z * child.w / new_mass) + (l_center.z * l_mass / new_mass);
+                    l_mass = new_mass;
+                } else {
+                    //printf("Tread %d cache node %d\n", myId, j);
+                    buffer[counter] = j;
+                    counter++;
+                }
+            }
+        } // Primo for
+
+        if (counter == 0) {
+            tree->node_pos[myNode].x = l_center.x;
+            tree->node_pos[myNode].y = l_center.y;
+            tree->node_pos[myNode].z = l_center.z;
+            tree->node_pos[myNode].w = l_mass;
+
+            __threadfence();
+            counter--;
+        }
+
+        ////printf("Thread %d node %d before loop\n", myId, myNode);
+
+        if (counter >= 0) {
+            counter--;
+            while (counter >= 0) {
+                //printf("Thread id %d node %d look for child: %d\n", myId, myNode, buffer[counter]);
+                j = buffer[counter];
+                if (tree->node_pos[j].w != 0.0) {
+                    child = tree->node_pos[j];
+
+                    new_mass = l_mass + child.w;
+
+                    l_center.x = (child.x * child.w / new_mass) + (l_center.x * l_mass / new_mass);
+                    l_center.y = (child.y * child.w / new_mass) + (l_center.y * l_mass / new_mass);
+                    l_center.z = (child.z * child.w / new_mass) + (l_center.z * l_mass / new_mass);
+                    l_mass = new_mass;
+
+                    counter--;
+                    //printf("Thread id %d calculate child: %d, counter at end %d\n", myId, j, counter);
+                }
+
+                if (counter == -1) {
+                    tree->node_pos[myNode].x = l_center.x;
+                    tree->node_pos[myNode].y = l_center.y;
+                    tree->node_pos[myNode].z = l_center.z;
+                    tree->node_pos[myNode].w = l_mass;
+
+                    __threadfence();
+                    //printf("Thead %d node %d finish\n", myId, myNode);
+                }
+
+            }
+        }
+
+    } // if myNode
+}
+
+__global__
+void sort_tree_leaves(Octtree *tree, int *sorted_nodes, int ents_sz) {
+    int myId;
+    int offset;
+    int child_i;
+    int not_done;
+    int my_parent;
+    int my_node_i;
+    int i;
+
+    myId = blockIdx.x * blockDim.x + threadIdx.x;
+    offset = 0;
+
+    if (myId == 0) { // The root doesn't wait
+        for (i = 0; i < 8; i++) {
+            child_i = tree->children[ents_sz * 8 + i];
+            if (child_i != -1) {
+                sorted_nodes[offset] = child_i;
+                offset += tree->ents[child_i];
+            }
+        }
+        // Sblocca la radice
+        tree->mutex[ents_sz] = 1;
+        __threadfence();
+        //printf("Thread %d fnish\n", myId);
+        //printf("FirstFree: %d\n", tree->firstfree);
+
+    } else if (myId + ents_sz < tree->firstfree) {
+        not_done = 1;
+        my_parent = tree->parent[myId + ents_sz];
+        my_node_i = myId + ents_sz;
+        int has_write = 0;
+
+        while (not_done) {
+            if (has_write == 0) {
+                //printf("Thread %d waiting: mynode: %d, myparent: %d\n", myId, my_node_i, my_parent);
+                has_write = 1;
+            }
+            if (tree->mutex[my_parent] == 1) {
+                //printf("Thread %d working= my node: %d, parent: %d\n", myId, my_node_i, my_parent);
+                offset = -1;
+                i = -1;
+                // Check my positions into array
+                while (offset == -1) {
+                    i++;
+                    if (sorted_nodes[i] == my_node_i)
+                        offset = i;
+                    if (i > ents_sz)
+                        printf("Thread %d è andato fuori l'array: %d\n", myId, i);
+                }
+
+                // Write positions of my children
+                for (i = 0; i < 8; i++) {
+                    child_i = tree->children[my_node_i * 8 + i];
+                    if (child_i != -1) {
+                        sorted_nodes[offset] = child_i;
+                        offset += tree->ents[child_i];
+                    }
+                } // for over children
+
+                tree->mutex[my_node_i] = 1;
+                __threadfence();
+                //printf("Thread %d finish= my node: %d\n", myId, my_node_i);
+                not_done = 0;
+            } // if parent == 1
+        } // while not_done
+    }
+}
+
+__global__
+void print_sorted(int *sorted_nodes, int ents_sz) {
+    for (int i = 0; i < ents_sz; i++) {
+        printf("%d ", sorted_nodes[i]);
+    }
+    printf("\n");
 }
 
 
@@ -516,6 +667,55 @@ void calculate_block_dim() {
 }
 
 __host__
+void do_all_mallocs_and_copy(int ents_sz, int n_steps, double **d_positions, double **d_velocities, double **d_accelerations, double **d_loc_max_in, double **d_loc_max_out, double *h_positions, double *h_velocities, int **d_sorted_nodes) {
+
+    cudaError_t error;
+
+    // Malloc
+    error = cudaMalloc((void **)d_positions, ents_sz * 4 * sizeof(double) * n_steps + 1);
+    cuda_check_error(error, "Devce positions malloc\n");
+
+    error = cudaMalloc((void **)d_velocities, ents_sz * 3 * sizeof(double));
+    cuda_check_error(error, "Devce velocities malloc\n");
+
+    error = cudaMalloc((void **)d_accelerations, ents_sz * 3 * sizeof(double));
+    cuda_check_error(error, "Devce accelerations malloc\n");
+
+    error = cudaMalloc((void **)d_loc_max_in, ents_sz* sizeof(double));
+    cuda_check_error(error, "Devce local max malloc\n");
+
+    error = cudaMalloc((void **)d_loc_max_out, ents_sz * sizeof(double));
+    cuda_check_error(error, "Device local max malloc\n");
+
+    error = cudaMalloc((void **)d_sorted_nodes, ents_sz * sizeof(int));
+    cuda_check_error(error, "Device sorted nodes malloc\n");
+
+
+    // Copy
+    error = cudaMemcpy(*d_positions, h_positions, ents_sz * 4 * sizeof(double), cudaMemcpyHostToDevice);
+    cuda_check_error(error, "Host do Device copy positions\n");
+
+    error = cudaMemcpy(*d_velocities, h_velocities, ents_sz * 3 * sizeof(double), cudaMemcpyHostToDevice);
+    cuda_check_error(error, "Host to Device copy velocities\n");
+
+}
+
+__host__
+void sort_tree(Octtree *tree, int *sorted_nodes, int *mutex, int ents_sz) {
+    dim3 grid(grid_s, 1, 1);
+    dim3 block(block_s, 1, 1);
+
+    printf("Sorting tree\n");
+    sort_tree_leaves<<<grid, block>>>(tree, sorted_nodes, ents_sz);
+    cudaDeviceSynchronize();
+    printf("Sorting finished\n");
+
+    reset_mutex(mutex, ents_sz);
+}
+
+
+
+__host__
 void run(double *h_positions, double *h_velocities, uint ents_sz, int n_steps, double dt, const char *output) {
     FILE *fpt;
     cudaError_t error;
@@ -525,9 +725,9 @@ void run(double *h_positions, double *h_velocities, uint ents_sz, int n_steps, d
     double *d_loc_max_in, *d_loc_max_out;
 
     // Tree data
-    Octtree *d_tree;
+    Octtree *d_tree, *h_tree;
     double4 *d_node_pos;
-    int *d_ents, *d_parent, *d_children, *d_mutex;
+    int *d_ents, *d_parent, *d_children, *d_mutex, *d_sorted_nodes;
 
     dim3 grid(grid_s, 1, 1);
     dim3 block(block_s, 1, 1);
@@ -538,44 +738,42 @@ void run(double *h_positions, double *h_velocities, uint ents_sz, int n_steps, d
         exit(1);
     }
 
-    error = cudaMalloc((void **)&d_positions, ents_sz * 4 * sizeof(double) * n_steps + 1);
-    cuda_check_error(error, "Device positions malloc\n");
-
-    error = cudaMalloc((void **)&d_velocities, ents_sz * 3 * sizeof(double));
-    cuda_check_error(error, "Device velocities malloc\n");
-
-    error = cudaMalloc((void **)&d_accelerations, ents_sz * 3 * sizeof(double));
-    cuda_check_error(error, "Device accelerations malloc\n");
-
-    // Max size for find max of buonding box is in first iteration, 1 max for each block
-    error = cudaMalloc((void **)&d_loc_max_in, block_s * sizeof(double));
-    cuda_check_error(error, "Device local max malloc\n");
-
-    error = cudaMalloc((void **)&d_loc_max_out, block_s * sizeof(double));
-    cuda_check_error(error, "Device local max malloc\n");
-
-    error = cudaMemcpy(d_positions, h_positions, ents_sz * 4 * sizeof(double), cudaMemcpyHostToDevice);
-    cuda_check_error(error, "Host do Device copy positions\n");
-
-    error = cudaMemcpy(d_velocities, h_velocities, ents_sz * 3 * sizeof(double), cudaMemcpyHostToDevice);
-    cuda_check_error(error, "Host to Device copy velocities\n");
-
-
-    fpt = fopen(output, "w");
-
+    do_all_mallocs_and_copy(ents_sz, n_steps, &d_positions, &d_velocities, &d_accelerations, &d_loc_max_in, &d_loc_max_out, h_positions, h_velocities, &d_sorted_nodes);
 
     init_tree(&d_tree, ents_sz, &d_node_pos, &d_ents, &d_parent, &d_children, &d_mutex);
+
     bounding_box(d_positions, d_loc_max_in, d_loc_max_out, ents_sz, 0, d_tree);
 
     add_ent<<<grid, block>>>(d_tree, (double4 *)d_positions, ents_sz);
     cudaDeviceSynchronize();
 
+    //print_tree(d_tree, ents_sz, d_node_pos, d_children, d_ents);
 
-    center_of_mass<<<grid, block>>>(d_tree, ents_sz);
+    h_tree = (Octtree *)malloc(sizeof(Octtree));
+
+    error = cudaMemcpy(h_tree, d_tree, sizeof(Octtree), cudaMemcpyDeviceToHost);
+    cuda_check_error(error, "Tree to Device copy velocities\n");
+
+    int g = ((double)(h_tree->firstfree - ents_sz) / (double)block_s) + 1;
+    //dim3 grid2(g, 1, 1);
+
+    //printf("g: %d, first free: %d\n", g, h_tree->firstfree);
+    printf("Center of mass\n");
+    center_of_mass<<<grid, block>>>(d_tree, ents_sz, block_s);
     cudaDeviceSynchronize();
 
-    print_tree(d_tree, ents_sz, d_node_pos, d_children, d_ents);
-    exit(1);
+    //print_tree(d_tree, ents_sz, d_node_pos, d_children, d_ents);
+    //cudaDeviceSynchronize();
+
+    //print_mutex<<<1,1>>>(d_tree, ents_sz);
+    //cudaDeviceSynchronize();
+
+    sort_tree(d_tree, d_sorted_nodes, d_mutex, ents_sz);
+
+    print_sorted<<<1, 1>>>(d_sorted_nodes, ents_sz);
+    cudaDeviceSynchronize();
+
+    exit(0);
 
     // TODO: calcolo accelerazione
 
@@ -602,13 +800,18 @@ void run(double *h_positions, double *h_velocities, uint ents_sz, int n_steps, d
     cuda_check_error(error, "Device to Host copy positions\n");
     double4 *h_poss = (double4 *) h_pos;
 
+    fpt = fopen(output, "w");
     for (int i = 0; i < ents_sz * n_steps; i++)
         fprintf(fpt, "%d,%lf,%lf,%lf,%lf\n", i%ents_sz, h_poss[i].x, h_poss[i].y, h_poss[i].z, h_poss[i].w);
+
 
     free(h_pos);
     cudaFree(d_positions);
     cudaFree(d_velocities);
     cudaFree(d_accelerations);
+    cudaFree(d_loc_max_in);
+    cudaFree(d_loc_max_out);
+    cudaFree(d_sorted_nodes);
 
     fclose(fpt);
 }

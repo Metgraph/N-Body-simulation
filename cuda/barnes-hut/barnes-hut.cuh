@@ -33,6 +33,8 @@ __global__
 void print_max_tree(Octtree *tree);
 __device__
 int init_node(Octtree *tree);
+__host__
+void reset_mutex(int *mutex, int ents_sz);
 
 
 /*
