@@ -547,7 +547,7 @@ void center_of_mass(Octtree *tree, int ents_sz, int block) {
         int j;
         int counter = 0;
 
-        int last_child = -1;
+        //int last_child = -1;
 
         l_center.x = tree->node_pos[myNode].x;
         l_center.y = tree->node_pos[myNode].y;
@@ -600,7 +600,7 @@ void sort_tree_leaves(Octtree *tree, int *sorted_nodes, int ents_sz) {
     int not_done;
     int my_node_i;
     int i;
-    int child_ents;
+    //int child_ents;
 
     myId = blockIdx.x * blockDim.x + threadIdx.x;
     offset = 0;
