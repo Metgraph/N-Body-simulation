@@ -748,7 +748,7 @@ void sort_tree_leaves(Octtree *tree, int *sorted_nodes, int ents_sz) {
             if (!write && compute == 0) {
                 //printf("Thread %d node %d waiting for parent: %d | my mutex: %d, my offset: %d\n", myId, my_node_i, my_parent, tree->mutex[my_node_i], tree->mutex[my_node_i+tree->firstfree]);
             }
-            write = (write + 1)%500;
+            //write = (write + 1)%500;
             if (tree->mutex[my_node_i] == 1 && compute == 0) {
                 //printf("Thread %d pre check positions node: %d, parent: %d\n", myId, my_node_i, my_parent);
                 offset = (my_node_i == ents_sz) ? 0 : tree->mutex[my_node_i+tree->firstfree];
@@ -799,6 +799,29 @@ void print_sorted(int *sorted_nodes, int ents_sz) {
     printf("\n");
 }
 
+__global__
+void ci_sono_tutti_i_numeri(int *sorted_nodes, int ents_sz) {
+    for (int i = 0; i < ents_sz; i++) {
+        for (int j = 0; j < ents_sz; j++) {
+            if (i == sorted_nodes[j]){
+                break;
+            }
+        }
+        printf("Missing: %d\n", i); // qua dovrebbe arrivare solo se completa il giro
+    }
+}
+
+__global__
+void find_dups(int *sorted_nodes, int ents_sz) {
+    for (int i = 0; i < ents_sz; i++) {
+        for (int j = 0; j < ents_sz; j++) {
+            if (sorted_nodes[i] == sorted_nodes[j] && i != j){
+                printf("Duplicate of %d at pos %d found at %d\n", sorted_nodes[i], i, sorted_nodes[j]);
+            }
+        }
+    }
+
+}
 
 __global__
 void mini_print(Octtree *tree, int ents_sz) {
@@ -958,7 +981,6 @@ void run(double *h_positions, double *h_velocities, uint ents_sz, int n_steps, d
     center_of_mass<<<g, block, block_s * sizeof(int)>>>(d_tree, ents_sz, block_s);
     //set_branch_values<<<grid, block>>>(d_tree);
     cudaDeviceSynchronize();
-    exit(0);
 
     //print_tree(d_tree, ents_sz, d_node_pos, d_children, d_ents);
     //cudaDeviceSynchronize();
@@ -973,7 +995,14 @@ void run(double *h_positions, double *h_velocities, uint ents_sz, int n_steps, d
     cudaDeviceSynchronize();
 
 
+    ci_sono_tutti_i_numeri<<<1, 1>>>(d_sorted_nodes, ents_sz);
+    cudaDeviceSynchronize();
+
+
+    find_dups<<<1, 1>>>(d_sorted_nodes, ents_sz);
+    cudaDeviceSynchronize();
     // TODO: calcolo accelerazione
+    exit(0);
 
     acceleration<<<grid, block, shsz * sizeof(double) * 4>>>(d_positions, d_accelerations, ents_sz, 0);
 
