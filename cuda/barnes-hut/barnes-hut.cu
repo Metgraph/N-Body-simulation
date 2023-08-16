@@ -649,28 +649,40 @@ void sort_tree_leaves(Octtree *tree, int *sorted_nodes, int ents_sz) {
 }
 
 __global__
-void print_sorted(int *sorted_nodes, int ents_sz) {
-    for (int i = 0; i < ents_sz; i++) {
+void print_sorted(int *sorted_nodes, int ents_sz, int start) {
+    int end=ents_sz>start+500 ? start+500: ents_sz;
+    for (int i = start; i < end; i++) {
         printf("%d ", sorted_nodes[i]);
     }
-    printf("\n");
+    // printf("\n");
 }
 
 __global__
 void ci_sono_tutti_i_numeri(int *sorted_nodes, int ents_sz) {
     for (int i = 0; i < ents_sz; i++) {
+        if(i%1000==0){
+            printf("checking in range %d - %d\n", i, i+1000);
+        }
+        int miss=1;
         for (int j = 0; j < ents_sz; j++) {
             if (i == sorted_nodes[j]){
+                miss=0;
                 break;
             }
         }
-        printf("Missing: %d\n", i); // qua dovrebbe arrivare solo se completa il giro
+        if(miss){
+            printf("Missing: %d\n", i); // qua dovrebbe arrivare solo se completa il giro
+
+        }
     }
 }
 
 __global__
 void find_dups(int *sorted_nodes, int ents_sz) {
     for (int i = 0; i < ents_sz; i++) {
+        if(i%1000==0){
+            printf("checking in range %d - %d\n", i, i+1000);
+        }
         for (int j = 0; j < ents_sz; j++) {
             if (sorted_nodes[i] == sorted_nodes[j] && i != j){
                 printf("Duplicate of %d at pos %d found at %d\n", sorted_nodes[i], i, sorted_nodes[j]);
@@ -846,18 +858,24 @@ void run(double *h_positions, double *h_velocities, uint ents_sz, int n_steps, d
     //cudaDeviceSynchronize();
 
     sort_tree(d_tree, d_sorted_nodes, d_mutex, ents_sz, h_tree->firstfree);
-    printf("Sort finish");
+    printf("Sort finish\n");
 
-    print_sorted<<<1, 1>>>(d_sorted_nodes, ents_sz);
-    cudaDeviceSynchronize();
+    for(int start=0; start<ents_sz; start+=500){
+        print_sorted<<<1, 1>>>(d_sorted_nodes, ents_sz, start);
+        cudaDeviceSynchronize();
+
+    }
+    printf("\n");
 
 
     ci_sono_tutti_i_numeri<<<1, 1>>>(d_sorted_nodes, ents_sz);
     cudaDeviceSynchronize();
+    printf("END ci sono tutti\n");
 
 
     find_dups<<<1, 1>>>(d_sorted_nodes, ents_sz);
     cudaDeviceSynchronize();
+    printf("END find dups\n");
     // TODO: calcolo accelerazione
     exit(0);
 
@@ -1039,6 +1057,7 @@ void acceleration(double *positions, double *acc, uint ents_sz, int step) {
     }
 }
 
+/*
 __global__
 void acceleration_w_stack(Octtree *tree, double *positions, int ents_sz, size_t dt, int total_mem){
     //change 32 with warp size
@@ -1056,6 +1075,7 @@ void acceleration_w_stack(Octtree *tree, double *positions, int ents_sz, size_t 
     
 
 }
+*/
 
 __global__
 void update_velocities(double *acc, double *vel, uint ents_sz, double dt) {
