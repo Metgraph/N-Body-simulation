@@ -546,6 +546,7 @@ void center_of_mass(Octtree *tree, int ents_sz, int block) {
         double3 l_center;
         int j;
         int counter = 0;
+        int child_counter = 0;
 
         //int last_child = -1;
 
@@ -571,10 +572,11 @@ void center_of_mass(Octtree *tree, int ents_sz, int block) {
                     l_center.z = (child.z * child.w / new_mass) + (l_center.z * l_mass / new_mass);
                     l_mass = new_mass;
 
-                    printf("Thread %d node %d calculated child %d node %d\n", myId, myNode, counter, j);
+                    //printf("Thread %d node %d calculated child %d node %d\n", myId, myNode, counter, j);
 
                     counter++;
                     j = tree->children[myNode * 8 + counter];
+                    child_counter++;
                 }
             } // if counter < 8
 
@@ -585,8 +587,10 @@ void center_of_mass(Octtree *tree, int ents_sz, int block) {
                 tree->node_pos[myNode].w = l_mass;
 
                 __threadfence();
-                printf("Thread %d node %d done counter %d\n", myId, myNode, counter);
+                //printf("Thread %d node %d done counter %d\n", myId, myNode, counter);
                 done = 1;
+                if(child_counter != tree->ents[myNode])
+                    printf("Thread %d nodo %d numero entità contato %d, precedentemente segnate: %d\n", myId, myNode, child_counter, tree->ents[myNode]);
             }
         } // While done
     } // if mynode>ents_sz
