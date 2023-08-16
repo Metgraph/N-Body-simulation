@@ -598,18 +598,22 @@ void center_of_mass(Octtree *tree, int ents_sz, int block) {
 
 __global__
 void sort_tree_leaves(Octtree *tree, int *sorted_nodes, int ents_sz) {
+    extern __shared__ int shTerminate[];
     int myId;
     int offset;
     int child_i;
     int not_done;
+    //int my_parent;
     int my_node_i;
     int i;
-    //int child_ents;
+    int child_ents;
 
+    //int sz_threads = gridDim.x * blockDim.x;
     myId = blockIdx.x * blockDim.x + threadIdx.x;
     offset = 0;
 
     my_node_i = myId + ents_sz;
+    shTerminate[threadIdx.x] = 0;
 
     if (my_node_i < tree->firstfree){
         if (my_node_i == ents_sz){ // Sono la root
@@ -621,8 +625,14 @@ void sort_tree_leaves(Octtree *tree, int *sorted_nodes, int ents_sz) {
         //my_parent = (my_node_i == ents_sz) ? 0 : tree->parent[myId + ents_sz];
         //if (myId == 0) printf("My parent: %d - ents_sz: %d\n", my_parent, ents_sz);
         //my_node_i = myId + ents_sz;
+        int write = 0;
+        int compute = 0;
         while (not_done) {
-            if (tree->mutex[my_node_i] == 1) {
+            if (!write && compute == 0) {
+                //printf("Thread %d node %d waiting for parent: %d | my mutex: %d, my offset: %d\n", myId, my_node_i, my_parent, tree->mutex[my_node_i], tree->mutex[my_node_i+tree->firstfree]);
+            }
+            write = (write + 1)%500;
+            if (tree->mutex[my_node_i] == 1 && compute == 0) {
                 //printf("Thread %d pre check positions node: %d, parent: %d\n", myId, my_node_i, my_parent);
                 offset = (my_node_i == ents_sz) ? 0 : tree->mutex[my_node_i+tree->firstfree];
                 i = -1;
@@ -630,58 +640,143 @@ void sort_tree_leaves(Octtree *tree, int *sorted_nodes, int ents_sz) {
                     child_i = tree->children[my_node_i * 8 + i];
                     if (child_i != -1) {
                         sorted_nodes[offset] = child_i;
-
+                        //for (int j = 0; j < child_ents; j++){
+                        //    sorted_nodes[offset + j] = child_i;
+                        //}
                         tree->mutex[child_i+tree->firstfree] = offset;
                         tree->mutex[child_i] = 1;
 
-                        offset += tree->ents[child_i];
+                        child_ents = tree->ents[child_i];
+                        offset += child_ents;
                         __threadfence();
-
-                        // Restore mutex array
-                        tree->mutex[my_node_i] = 0;
-                        tree->mutex[my_node_i+tree->firstfree] = 0;
                         //printf("Thread %d unlock node: %d\n", myId, child_i);
                     }
                     if (i == 7) {
                         //printf("Thread %d finish write positions\n", myId);
-                        not_done = 0;
+                        shTerminate[threadIdx.x] = 1;
+                        compute = 1;
                     }
                 } // for over children
             } // if parent == 1
+            if (compute != 0) {
+                int check = 0;
+                for (int i=0; i<blockDim.x; i++) {
+                    check += shTerminate[i];
+                }
+                if (check%blockDim.x == 0){
+                    not_done = 0;
+                    //if(threadIdx.x == 0)printf("Block %d terminate\n", blockIdx.x);
+                }
+            }
         } // while not_done
+    } else {
+        shTerminate[threadIdx.x] = 1;
     }
 }
 
 __global__
-void print_sorted(int *sorted_nodes, int ents_sz) {
-    for (int i = 0; i < ents_sz; i++) {
+void print_sorted(int *sorted_nodes, int ents_sz, int start) {
+    int end=ents_sz>start+500 ? start+500: ents_sz;
+    for (int i = start; i < end; i++) {
         printf("%d ", sorted_nodes[i]);
     }
-    printf("\n");
+    // printf("\n");
 }
 
-__global__
-void ci_sono_tutti_i_numeri(int *sorted_nodes, int ents_sz) {
-    for (int i = 0; i < ents_sz; i++) {
-        for (int j = 0; j < ents_sz; j++) {
-            if (i == sorted_nodes[j]){
-                break;
-            }
+// __global__
+// void ci_sono_tutti_i_numeri(int *sorted_nodes, int ents_sz) {
+//     for (int i = 0; i < ents_sz; i++) {
+//         if(i%1000==0){
+//             printf("checking in range %d - %d\n", i, i+1000);
+//         }
+//         int miss=1;
+//         for (int j = 0; j < ents_sz; j++) {
+//             if (i == sorted_nodes[j]){
+//                 miss=0;
+//                 break;
+//             }
+//         }
+//         if(miss){
+//             printf("Missing: %d\n", i); // qua dovrebbe arrivare solo se completa il giro
+
+//         }
+//     }
+// }
+
+__global__ void ci_sono_tutti_i_numeri(int *sorted_nodes, int ents_sz)
+{
+    int id = threadIdx.x + blockDim.x * blockIdx.x;
+    __shared__ int cache[1024];
+
+    int cache_id = id % 1024;
+
+    int miss = id<ents_sz ? 1 : 0;
+    for (int i = 0; i < ents_sz; i += blockDim.x)
+    {
+        if (i + cache_id < ents_sz)
+        {
+            cache[cache_id] = sorted_nodes[i + cache_id];
         }
-        printf("Missing: %d\n", i); // qua dovrebbe arrivare solo se completa il giro
+        __syncthreads();
+
+        int iteration_end = ents_sz > i + blockDim.x ? blockDim.x : ents_sz - i;
+        for (int j = 0; j < iteration_end; j++)
+        {
+            miss = miss && id != cache[j];
+        }
+        if (__syncthreads_and(!miss))
+        {
+            return;
+        }
+    }
+
+    if (miss)
+    {
+        printf("Missing: %d\n", id); // qua dovrebbe arrivare solo se completa il giro
     }
 }
 
-__global__
-void find_dups(int *sorted_nodes, int ents_sz) {
-    for (int i = 0; i < ents_sz; i++) {
-        for (int j = 0; j < ents_sz; j++) {
-            if (sorted_nodes[i] == sorted_nodes[j] && i != j){
-                printf("Duplicate of %d at pos %d found at %d\n", sorted_nodes[i], i, sorted_nodes[j]);
+// __global__
+// void find_dups(int *sorted_nodes, int ents_sz) {
+//     for (int i = 0; i < ents_sz; i++) {
+//         if(i%1000==0){
+//             printf("checking in range %d - %d\n", i, i+1000);
+//         }
+//         for (int j = 0; j < ents_sz; j++) {
+//             if (sorted_nodes[i] == sorted_nodes[j] && i != j){
+//                 printf("Duplicate of %d at pos %d found at %d\n", sorted_nodes[i], i, sorted_nodes[j]);
+//             }
+//         }
+//     }
+
+// }
+
+__global__ void find_dups(int *sorted_nodes, int ents_sz)
+{
+    int id = threadIdx.x + blockDim.x * blockIdx.x;
+    if (ents_sz > id)
+    {
+        int my_val=sorted_nodes[id];
+        __shared__ int cache[1024];
+        int cache_id = id % 1024;
+        for (int i = 0; i < ents_sz; i+=blockDim.x)
+        {
+            if (i + cache_id < ents_sz)
+            {
+                cache[cache_id] = sorted_nodes[i + cache_id];
             }
+            __syncthreads();
+            int iteration_end = ents_sz > i + blockDim.x ? blockDim.x : ents_sz - i;
+            for (int j = 0; j < iteration_end; j++)
+            {
+                if (my_val == cache[j] && id != i+j)
+                {
+                    printf("Duplicate of %d at pos %d found at %d\n", my_val, id, i+j);
+                }
+            }
+            __syncthreads();
         }
     }
-
 }
 
 __global__
@@ -784,7 +879,8 @@ void sort_tree(Octtree *tree, int *sorted_nodes, int *mutex, int ents_sz, int fi
     dim3 block(block_s, 1, 1);
 
     printf("Sorting tree grid: %d, block size: %d, first free: %d\n", size, block_s, first_free);
-    sort_tree_leaves<<<grid, block>>>(tree, sorted_nodes, ents_sz);
+    // sort_tree_leaves<<<grid, block>>>(tree, sorted_nodes, ents_sz);
+    sort_tree_leaves<<<grid, block, block_s * sizeof(int)>>>(tree, sorted_nodes, ents_sz);
     cudaDeviceSynchronize();
     printf("Sorting finished\n");
 
@@ -850,18 +946,32 @@ void run(double *h_positions, double *h_velocities, uint ents_sz, int n_steps, d
     //cudaDeviceSynchronize();
 
     sort_tree(d_tree, d_sorted_nodes, d_mutex, ents_sz, h_tree->firstfree);
-    printf("Sort finish");
+    printf("Sort finish\n");
 
-    print_sorted<<<1, 1>>>(d_sorted_nodes, ents_sz);
+    for(int start=0; start<ents_sz; start+=500){
+        print_sorted<<<1, 1>>>(d_sorted_nodes, ents_sz, start);
+        cudaDeviceSynchronize();
+
+    }
+    printf("\n");
+
+
+    // ci_sono_tutti_i_numeri<<<1, 1>>>(d_sorted_nodes, ents_sz);
+    // cudaDeviceSynchronize();
+    // printf("END ci sono tutti\n");
+
+
+    // find_dups<<<1, 1>>>(d_sorted_nodes, ents_sz);
+    // cudaDeviceSynchronize();
+    // printf("END find dups\n");
+    int block_sz = (ents_sz - 1) / 1024 + 1;
+    ci_sono_tutti_i_numeri<<<block_sz, 1024>>>(d_sorted_nodes, ents_sz);
     cudaDeviceSynchronize();
+    printf("END ci sono tutti i numeri\n");
 
-
-    ci_sono_tutti_i_numeri<<<1, 1>>>(d_sorted_nodes, ents_sz);
+    find_dups<<<block_sz, 1024>>>(d_sorted_nodes, ents_sz);
     cudaDeviceSynchronize();
-
-
-    find_dups<<<1, 1>>>(d_sorted_nodes, ents_sz);
-    cudaDeviceSynchronize();
+    printf("END find dups\n");
     // TODO: calcolo accelerazione
     exit(0);
 
@@ -1042,6 +1152,26 @@ void acceleration(double *positions, double *acc, uint ents_sz, int step) {
         gAcc[myId].z = l_acc.z;
     }
 }
+
+/*
+__global__
+void acceleration_w_stack(Octtree *tree, double *positions, int ents_sz, size_t dt, int total_mem){
+    //change 32 with warp size
+    int myId, myIdInWarp, myWarpId, stackSz, totalWarps;
+    Stacknode *myStack;
+    double4 my_pos_mass;
+    myId=threadIdx.x + blockIdx.x * blockDim.x;
+    myIdInWarp = threadIdx.x%32;
+    myWarpId=threadIdx.x/32;
+    totalWarps = (blockDim.x-1)/32+1;
+    stackSz=total_mem/totalWarps;
+    //TODO check memory dimensions while adding values in the stack
+    __shared__ Stacknode stacks[total_mem];
+    myStack=&stacks[stackSz*myWarpId];
+    
+
+}
+*/
 
 __global__
 void update_velocities(double *acc, double *vel, uint ents_sz, double dt) {
