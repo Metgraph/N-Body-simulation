@@ -702,19 +702,33 @@ void print_sorted(int *sorted_nodes, int ents_sz, int start) {
 __global__ void ci_sono_tutti_i_numeri(int *sorted_nodes, int ents_sz)
 {
     int id = threadIdx.x + blockDim.x * blockIdx.x;
-    if (id < ents_sz)
-    {
-        int miss = 1;
-        for (int i = 0; i < ents_sz; i++)
-        {
-            if (sorted_nodes[i] == id)
-                miss = 0;
-        }
+    __shared__ int cache[1024];
 
-        if (miss)
+    int cache_id = id % 1024;
+
+    int miss = id<ents_sz ? 1 : 0;
+    for (int i = 0; i < ents_sz; i += blockDim.x)
+    {
+        if (i + cache_id < ents_sz)
         {
-            printf("Missing: %d\n", id); // qua dovrebbe arrivare solo se completa il giro
+            cache[cache_id] = sorted_nodes[i + cache_id];
         }
+        __syncthreads();
+
+        int iteration_end = ents_sz > i + blockDim.x ? blockDim.x : ents_sz - i;
+        for (int j = 0; j < iteration_end; j++)
+        {
+            miss = miss && id != cache[j];
+        }
+        if (__syncthreads_and(!miss))
+        {
+            return;
+        }
+    }
+
+    if (miss)
+    {
+        printf("Missing: %d\n", id); // qua dovrebbe arrivare solo se completa il giro
     }
 }
 
