@@ -586,7 +586,7 @@ void center_of_mass(Octtree *tree, int ents_sz, int block) {
 
                 __threadfence();
                 printf("Thread %d node %d done counter %d\n", myId, myNode, counter);
-                done = 0;
+                done = 1;
             }
         } // While done
     } // if mynode>ents_sz
