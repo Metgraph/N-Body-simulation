@@ -18,6 +18,11 @@ typedef struct {
     int sz;
 } Octtree;
 
+typedef struct {
+    int id;
+    double4 pos_mass;
+} Stacknode;
+
 
 __host__
 void cuda_check_error(cudaError_t error, const char *message);

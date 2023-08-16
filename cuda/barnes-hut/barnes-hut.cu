@@ -1040,6 +1040,24 @@ void acceleration(double *positions, double *acc, uint ents_sz, int step) {
 }
 
 __global__
+void acceleration_w_stack(Octtree *tree, double *positions, int ents_sz, size_t dt, int total_mem){
+    //change 32 with warp size
+    int myId, myIdInWarp, myWarpId, stackSz, totalWarps;
+    Stacknode *myStack;
+    double4 my_pos_mass;
+    myId=threadIdx.x + blockIdx.x * blockDim.x;
+    myIdInWarp = threadIdx.x%32;
+    myWarpId=threadIdx.x/32;
+    totalWarps = (blockDim.x-1)/32+1;
+    stackSz=total_mem/totalWarps;
+    //TODO check memory dimensions while adding values in the stack
+    __shared__ Stacknode stacks[total_mem];
+    myStack=&stacks[stackSz*myWarpId];
+    
+
+}
+
+__global__
 void update_velocities(double *acc, double *vel, uint ents_sz, double dt) {
     int myId;
 
