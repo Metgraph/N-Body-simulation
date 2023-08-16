@@ -702,32 +702,14 @@ void print_sorted(int *sorted_nodes, int ents_sz, int start) {
 __global__ void ci_sono_tutti_i_numeri(int *sorted_nodes, int ents_sz)
 {
     int id = threadIdx.x + blockDim.x * blockIdx.x;
-    if (ents_sz > id)
+    if (id < ents_sz)
     {
-
-        __shared__ int cache[1024];
-        int cache_id = id % 1024;
-
         int miss = 1;
-        for (int i = 0; i < ents_sz; i += blockDim.x)
+        for (int i = 0; i < ents_sz; i++)
         {
-            if (i + cache_id < ents_sz)
-            {
-                cache[cache_id] = sorted_nodes[i + cache_id];
-            }
-            __syncthreads();
-
-            int iteration_end = ents_sz > i + blockDim.x ? blockDim.x : ents_sz - i;
-            for (int j = 0; j < iteration_end; j++)
-            {
-                miss = miss && id != cache[j];
-            }
-            if (__syncthreads_and(!miss))
-            {
-                break;
-            }
+            if (sorted_nodes[i] == id)
+                miss = 0;
         }
-        __syncthreads();
 
         if (miss)
         {
@@ -967,7 +949,7 @@ void run(double *h_positions, double *h_velocities, uint ents_sz, int n_steps, d
     int block_sz = (ents_sz - 1) / 1024 + 1;
     ci_sono_tutti_i_numeri<<<block_sz, 1024>>>(d_sorted_nodes, ents_sz);
     cudaDeviceSynchronize();
-    printf("END find dups\n");
+    printf("END ci sono tutti i numeri\n");
 
     find_dups<<<block_sz, 1024>>>(d_sorted_nodes, ents_sz);
     cudaDeviceSynchronize();
