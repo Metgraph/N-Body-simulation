@@ -21,6 +21,7 @@ typedef struct {
 typedef struct {
     int id;
     double4 pos_mass;
+    double border;
 } Stacknode;
 
 
