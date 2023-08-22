@@ -19,7 +19,7 @@ __global__ void acceleration(double *positions, double *acc, uint ents_sz, int s
 __host__ void safe_malloc_double(double **pointer, int quantity);
 __global__ void update_positions(double *positions, double *velocities, uint ents_sz, double dt, int step);
 __global__ void update_velocities(double *acc, double *vel, uint ents_sz, double dt);
-__host__ void run(double *positions, double *velocities, uint ents_sz, int n_steps, double dt, const char *output);
+__host__ void propagation(double *positions, double *velocities, uint ents_sz, int n_steps, double dt, const char *output);
 
 uint grid_s;
 uint block_s;
@@ -53,7 +53,7 @@ int main(int argc, char *argv[]) {
     printf("Start: %f, end: %f, delta time: %f, time steps: %d, ents: %d\n", start, end, dt, n_steps, n_ents);
 
     clock_gettime(CLOCK_REALTIME, &s);
-    run(positions, velocities, n_ents, n_steps, dt, argv[5]);
+    propagation(positions, velocities, n_ents, n_steps, dt, argv[5]);
     clock_gettime(CLOCK_REALTIME, &e);
 
     printf("Completed. Output file: %s\n", argv[5]);
@@ -82,7 +82,7 @@ void calculate_block_dim() {
 }
 
 __host__
-void run(double *h_positions, double *h_velocities, uint ents_sz, int n_steps, double dt, const char *output) {
+void propagation(double *h_positions, double *h_velocities, uint ents_sz, int n_steps, double dt, const char *output) {
     FILE *fpt;
     cudaError_t error;
     double *d_positions;
@@ -98,6 +98,7 @@ void run(double *h_positions, double *h_velocities, uint ents_sz, int n_steps, d
         exit(1);
     }
 
+    // Memory allocations and copies
     error = cudaMalloc((void **)&d_positions, ents_sz * 4 * sizeof(double) * n_steps + 1);
     cuda_check_error(error, "Device positions malloc\n");
 
@@ -118,15 +119,18 @@ void run(double *h_positions, double *h_velocities, uint ents_sz, int n_steps, d
 
     for (int t = 1; t <= n_steps; t++) {
 
+        // First 1/2 kick
         update_velocities<<<grid, block>>>(d_accelerations, d_velocities, ents_sz, dt);
         cudaDeviceSynchronize();
 
+        // Drift
         update_positions<<<grid, block>>>(d_positions, d_velocities, ents_sz, dt, t);
         cudaDeviceSynchronize();
 
         acceleration<<<grid, block, shsz * sizeof(double) * 4>>>(d_positions, d_accelerations, ents_sz, t);
         cudaDeviceSynchronize();
 
+        // Second 1/2 kick
         update_velocities<<<grid, block>>>(d_accelerations, d_velocities, ents_sz, dt);
         cudaDeviceSynchronize();
     }
@@ -242,27 +246,32 @@ void acceleration(double *positions, double *acc, uint ents_sz, int step) {
     int offset;
     double3 myBodyPos;
 
+    // Move pointer to current positions of iteration
     positions = positions + (ents_sz * 4 * step);
+    // Cast to double3-4 for more clear code later
     gPositions = (double4 *) positions;
-    //gPositions += ents_sz * step;
     gAcc = (double3 *) acc;
+
+    // Local acceleration
     l_acc = {0.0, 0.0, 0.0};
     myId = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (myId < ents_sz) {
-        // Mi tengo le mie posizioni per non accedere alla memoria globale
+        // Keep thread's body positions to avoid access to main memroy
         myBodyPos = {gPositions[myId].x, gPositions[myId].y, gPositions[myId].z};
     }
 
     for (i = 0, iteration = 0; i < ents_sz; i += blockDim.x, iteration++) {
-        offset = blockDim.x * iteration; // Calcola offset
+        // Offset for wich chunck of bodies retrieve in current iteration
+        offset = blockDim.x * iteration;
         if (offset + threadIdx.x < ents_sz){
-            // Ogni thread carica un corpo nella shared memory
+            // Each thread load a body into shared memory
             shPositions[threadIdx.x] = gPositions[offset + threadIdx.x];
         }
-        __syncthreads(); // Mi assicuro che tutti i thread carichino un corpo
+        __syncthreads(); // To ensure all threads load a body
         for (int j = 0; j < blockDim.x && offset+j < ents_sz; j++){
             if (threadIdx.x != j) {
+                // Calculate partial acceleartion
 
                 r_vector.x = shPositions[j].x - myBodyPos.x;
                 r_vector.y = shPositions[j].y - myBodyPos.y;
@@ -272,6 +281,7 @@ void acceleration(double *positions, double *acc, uint ents_sz, int step) {
                             r_vector.z * r_vector.z + 0.01;
                 inv_r3 = pow(inv_r3, -1.5);
 
+                // w attribute contain body's mass
                 l_acc.x += BIG_G * r_vector.x * inv_r3 * shPositions[j].w;
                 l_acc.y += BIG_G * r_vector.y * inv_r3 * shPositions[j].w;
                 l_acc.z += BIG_G * r_vector.z * inv_r3 * shPositions[j].w;
@@ -280,6 +290,7 @@ void acceleration(double *positions, double *acc, uint ents_sz, int step) {
     }
     __syncthreads();
 
+    // Save new acceleration to global memory
     if (myId < ents_sz) {
         gAcc[myId].x = l_acc.x;
         gAcc[myId].y = l_acc.y;
@@ -305,19 +316,24 @@ void update_positions(double *pos, double *velocities, uint ents_sz, double dt, 
     double4 *gPos;
     double3 *gVelocities;
     int myId;
+    int new_pos;
+    int old_pos;
 
+    // Cast to double3-4 for more clear code
     gPos = (double4 *) pos;
     gVelocities = (double3 *) velocities;
 
     myId = blockIdx.x * blockDim.x + threadIdx.x;
-    int new_pos = step * ents_sz + myId;
-    int old_pos = (step - 1) * ents_sz + myId;
+    // Calculate position into buffer to write new position
+    new_pos = step * ents_sz + myId;
+    // Previous position offset
+    old_pos = (step - 1) * ents_sz + myId;
 
     if (myId < ents_sz) {
         gPos[new_pos].x = gPos[old_pos].x + gVelocities[myId].x * dt;
         gPos[new_pos].y = gPos[old_pos].y + gVelocities[myId].y * dt;
         gPos[new_pos].z = gPos[old_pos].z + gVelocities[myId].z * dt;
-        gPos[new_pos].w = gPos[old_pos].w;
+        gPos[new_pos].w = gPos[old_pos].w; // Mass of the body
     }
 }
 
