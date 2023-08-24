@@ -607,6 +607,8 @@ void propagation(Entity ents[], int ents_sz, int n_steps, float dt,
         get_acceleration(&tree, acc, ents_sz);
 
         for (int t = 0; t < n_steps; t++) {
+            #pragma omp single
+            printf("loop %d\n", t);
             // 1/2 kick
 #pragma omp for
             for (int i = 0; i < ents_sz; i++) {
@@ -623,11 +625,11 @@ void propagation(Entity ents[], int ents_sz, int n_steps, float dt,
                 ents[i].pos.z += ents[i].vel.z * dt;
             }
 
-#pragma omp single
-            for (int i = 0; i < ents_sz; i++) {
-                fprintf(fpt, "%d,%lf,%lf,%lf,%lf\n", i, ents[i].pos.x,
-                        ents[i].pos.y, ents[i].pos.z, ents[i].mass);
-            }
+// #pragma omp single
+//             for (int i = 0; i < ents_sz; i++) {
+//                 fprintf(fpt, "%d,%lf,%lf,%lf,%lf\n", i, ents[i].pos.x,
+//                         ents[i].pos.y, ents[i].pos.z, ents[i].mass);
+//             }
 
             // Build new tree
 #pragma omp single
@@ -649,7 +651,7 @@ void propagation(Entity ents[], int ents_sz, int n_steps, float dt,
                 ents[i].vel.y += acc[i].y * dt / 2.0;
                 ents[i].vel.z += acc[i].z * dt / 2.0;
             }
-            get_energy(ents, ents_sz, KE + t, PE + t, local_KE, local_PE);
+            // get_energy(ents, ents_sz, KE + t, PE + t, local_KE, local_PE);
         }
         destroy_mutex(&tree);
     } // pragma
