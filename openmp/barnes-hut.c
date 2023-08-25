@@ -354,7 +354,7 @@ void update_center_of_mass(Octnode *child, RVec3 *center, double *mass) {
 
 void center_of_mass(Octtree *tree) {
 
-#pragma omp for nowait
+#pragma omp for nowait schedule(static)
     for (int n = tree->firstfree - 1; n >= tree->root; n--) {
         Octnode *my_node = &tree->nodes[n];
         RVec3 l_center = my_node->center;
@@ -649,7 +649,7 @@ void propagation(Entity ents[], int ents_sz, int n_steps, float dt,
                 ents[i].vel.y += acc[i].y * dt / 2.0;
                 ents[i].vel.z += acc[i].z * dt / 2.0;
             }
-            get_energy(ents, ents_sz, KE + t, PE + t, local_KE, local_PE);
+            //get_energy(ents, ents_sz, KE + t, PE + t, local_KE, local_PE);
         }
         destroy_mutex(&tree);
     } // pragma
