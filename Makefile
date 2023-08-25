@@ -1,6 +1,7 @@
 .PHONY : all serial
 BUILD_DIR ?= build
 COMPILER ?= gcc
+CUDA_COMPILER ?= nvcc
 
 .PHONY: all clean
 
@@ -41,6 +42,12 @@ barneshut:
 barneshutdebug:
 	${COMPILER} -Wall -g -o ${BUILD_DIR}/barnes-hut serial/barnes-hut.c -lm
 	${COMPILER} -Wall -g -o ${BUILD_DIR}/barnes-hut-omp openmp/barnes-hut.c -lm -fopenmp
+
+cuda_barneshut:
+	${CUDA_COMPILER} -o ${BUILD_DIR}/barnes-hut-cuda cuda/definitive_barnes-hut/barnes-hut.cu -lm -O2
+
+cuda_barneshutdebug:
+	${CUDA_COMPILER} -g -G -o ${BUILD_DIR}/barnes-hut-cuda cuda/definitive_barnes-hut/barnes-hut.cu -lm
 
 play:
 	python3 utils/pygame-show.py $(FILE)

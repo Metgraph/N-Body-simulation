@@ -7,4 +7,4 @@ all: $(objects)
 	nvcc -g -G -Werror all-warnings -I. -dc $< -o $@
 
 clean:
-	rm -f *.o app
+	find ./ -type f \( -perm /u+x -o -name "*.o" \) -delete
