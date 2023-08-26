@@ -77,11 +77,6 @@ void cuda_check_error(cudaError_t error, const char *message) {
 }
 
 __host__
-void calculate_block_dim() {
-    //
-}
-
-__host__
 void propagation(double *h_positions, double *h_velocities, uint ents_sz, int n_steps, double dt, const char *output) {
     FILE *fpt;
     cudaError_t error;
@@ -99,7 +94,7 @@ void propagation(double *h_positions, double *h_velocities, uint ents_sz, int n_
     }
 
     // Memory allocations and copies
-    error = cudaMalloc((void **)&d_positions, ents_sz * 4 * sizeof(double) * n_steps + 1);
+    error = cudaMalloc((void **)&d_positions, ents_sz * 4 * sizeof(double) * (n_steps + 1));
     cuda_check_error(error, "Device positions malloc\n");
 
     error = cudaMalloc((void **)&d_velocities, ents_sz * 3 * sizeof(double));
@@ -115,7 +110,9 @@ void propagation(double *h_positions, double *h_velocities, uint ents_sz, int n_
     cuda_check_error(error, "Host to Device copy velocities\n");
 
     fpt = fopen(output, "w");
+
     acceleration<<<grid, block, shsz * sizeof(double) * 4>>>(d_positions, d_accelerations, ents_sz, 0);
+    cudaDeviceSynchronize();
 
     for (int t = 1; t <= n_steps; t++) {
 
@@ -256,51 +253,50 @@ void acceleration(double *positions, double *acc, uint ents_sz, int step) {
     l_acc = {0.0, 0.0, 0.0};
     myId = blockIdx.x * blockDim.x + threadIdx.x;
 
+    //int count = 0;
+
     if (myId < ents_sz) {
         // Keep thread's body positions to avoid access to main memroy
-        myBodyPos = {gPositions[myId].x, gPositions[myId].y, gPositions[myId].z};
+        myBodyPos.x = gPositions[myId].x;
+        myBodyPos.y = gPositions[myId].y;
+        myBodyPos.z = gPositions[myId].z;
+    }
 
-        for (i = 0, iteration = 0; i < ents_sz; i += blockDim.x, iteration++) {
-            // Offset for wich chunck of bodies retrieve in current iteration
-            offset = blockDim.x * iteration;
-            if (offset + threadIdx.x < ents_sz){
-                // Each thread load a body into shared memory
-                shPositions[threadIdx.x] = gPositions[offset + threadIdx.x];
-            }
-            __syncthreads(); // To ensure all threads load a body
-            // Loop inside shared memory size && just on loaded bodies
+    for (i = 0, iteration = 0; i < ents_sz; i += blockDim.x, iteration++) {
+        // Offset for wich chunck of bodies retrieve in current iteration
+        offset = blockDim.x * iteration;
+        if (offset + threadIdx.x < ents_sz){
+            // Each thread load a body into shared memory
+            shPositions[threadIdx.x] = gPositions[offset + threadIdx.x];
+        }
+        __syncthreads(); // To ensure all threads load a body
+
+        // Loop inside shared memory size && just on loaded bodies
+        if (myId < ents_sz) {
             for (int j = 0; j < blockDim.x && offset+j < ents_sz; j++){
-                if (threadIdx.x != j) {
-                    // Calculate partial acceleartion
+                // Calculate partial acceleration
+                r_vector.x = shPositions[j].x - myBodyPos.x;
+                r_vector.y = shPositions[j].y - myBodyPos.y;
+                r_vector.z = shPositions[j].z - myBodyPos.z;
 
-                    r_vector.x = shPositions[j].x - myBodyPos.x;
-                    r_vector.y = shPositions[j].y - myBodyPos.y;
-                    r_vector.z = shPositions[j].z - myBodyPos.z;
+                inv_r3 = r_vector.x * r_vector.x + r_vector.y * r_vector.y +
+                            r_vector.z * r_vector.z + 0.01;
+                inv_r3 = pow(inv_r3, -1.5);
 
-                    inv_r3 = r_vector.x * r_vector.x + r_vector.y * r_vector.y +
-                                r_vector.z * r_vector.z + 0.01;
-                    inv_r3 = pow(inv_r3, -1.5);
-
-                    // w attribute contain body's mass
-                    l_acc.x += BIG_G * r_vector.x * inv_r3 * shPositions[j].w;
-                    l_acc.y += BIG_G * r_vector.y * inv_r3 * shPositions[j].w;
-                    l_acc.z += BIG_G * r_vector.z * inv_r3 * shPositions[j].w;
-                }
+                // w attribute contain body's mass
+                l_acc.x += BIG_G * r_vector.x * inv_r3 * shPositions[j].w;
+                l_acc.y += BIG_G * r_vector.y * inv_r3 * shPositions[j].w;
+                l_acc.z += BIG_G * r_vector.z * inv_r3 * shPositions[j].w;
             }
         }
         __syncthreads();
+    }
+    // Save new acceleration to global memory
+    if (myId < ents_sz) {
         gAcc[myId].x = l_acc.x;
         gAcc[myId].y = l_acc.y;
         gAcc[myId].z = l_acc.z;
-
     }
-
-    // Save new acceleration to global memory
-    //if (myId < ents_sz) {
-    //    gAcc[myId].x = l_acc.x;
-    //    gAcc[myId].y = l_acc.y;
-    //    gAcc[myId].z = l_acc.z;
-    //}
 }
 
 __global__
