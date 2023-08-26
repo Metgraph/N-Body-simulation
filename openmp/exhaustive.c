@@ -210,7 +210,6 @@ void acceleration(uint ents_sz, Entity *ents, RVec3 *acc) {
  */
 void propagation(Entity *ents, RVec3 *vel, uint ents_sz, int n_steps, float dt,
                  const char *output) {
-    FILE *fpt;
     RVec3 *acc;
 
     acc = malloc(ents_sz * sizeof(RVec3));
@@ -220,6 +219,7 @@ void propagation(Entity *ents, RVec3 *vel, uint ents_sz, int n_steps, float dt,
     }
 
 #ifdef RESULTS
+    FILE *fpt;
     fpt = fopen(output, "w");
     // Print to file initial state
     for (size_t i = 0; i < ents_sz; i++) {

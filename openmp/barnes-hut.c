@@ -528,7 +528,6 @@ void destroy_mutex(Octtree *tree) {
  */
 void propagation(Entity ents[], int ents_sz, int n_steps, float dt,
                  const char *output) {
-    FILE *fpt;
     Octtree tree;
     RVec3 *acc;
     pad_double loc_max[thread_count];
@@ -547,6 +546,7 @@ void propagation(Entity ents[], int ents_sz, int n_steps, float dt,
     }
 
 #ifdef RESULTS
+    FILE *fpt;
     fpt = fopen(output, "w");
     // Initial positions
     for (size_t i = 0; i < ents_sz; i++) {
