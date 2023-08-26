@@ -364,8 +364,9 @@ void center_of_mass(Octtree *tree) {
         int counter = 0;
 
         j = my_node->children[counter];
+        // Loop until all the children have been checked
         while (counter < 8) {
-            if (j == -1) {
+            if (j == -1) { // If child is empty
                 j = my_node->children[++counter];
             } else if (tree->nodes[j].mass != 0) {
                 update_center_of_mass(&tree->nodes[j], &l_center, &l_new_mass);
@@ -373,6 +374,7 @@ void center_of_mass(Octtree *tree) {
             }
         }
 
+        // Update my center and mass
         my_node->center = l_center;
         my_node->mass = l_new_mass;
     }
@@ -484,76 +486,6 @@ void destroy_mutex(Octtree *tree) {
     }
 }
 
-void get_energy(Entity *ents, int sz, double *KE, double *PE,
-                pad_double *local_KE, pad_double *local_PE) {
-
-    // calculate KE
-    int id = omp_get_thread_num();
-    local_KE[id].val = 0.0;
-
-#pragma omp for
-    for (int i = 0; i < sz; i++) {
-        RVec3 vel = ents[i].vel;
-        double mass = ents[i].mass;
-
-        local_KE[id].val += vel.x * vel.x * mass;
-        local_KE[id].val += vel.x * vel.x * mass;
-        local_KE[id].val += vel.x * vel.x * mass;
-    }
-
-#pragma omp single
-    {
-        *KE = 0.0;
-        for (int i = 0; i < thread_count; i++)
-            *KE += local_KE[i].val;
-        *KE *= 0.5;
-    }
-
-    // calculate PE
-    local_PE[id].val = 0.0;
-
-#pragma omp for
-    for (int i = 0; i < sz; i++) {
-        RVec3 *i_pos = &ents[i].pos;
-        for (int j = i; j < sz; j++) {
-            double dx, dy, dz, D;
-            RVec3 *j_pos = &ents[j].pos;
-
-            dx = i_pos->x - j_pos->x;
-            dy = i_pos->y - j_pos->y;
-            dz = i_pos->z - j_pos->z;
-            D = sqrt(dx * dx + dy * dy + dz * dz);
-            D = D > 0 ? 1.0 / D : D;
-
-            local_PE[id].val += -(ents[i].mass * ents[j].mass) * D;
-        }
-    }
-
-#pragma omp single
-    {
-        *PE = 0.0;
-        for (int i = 0; i < thread_count; i++)
-            *PE += local_PE[i].val;
-        *PE *= BIG_G;
-    }
-}
-
-void save_energy(const char *output, int n_steps, double *KE, double *PE) {
-    FILE *fpt;
-    char energy_file[100];
-    int l;
-
-    *energy_file = '\0';
-    l = strlen(output);
-    strcat(energy_file, output);
-    energy_file[l - 4] = '\0';
-    strcat(energy_file, "_energy.csv");
-    fpt = fopen(energy_file, "w");
-    for (int i = 0; i < n_steps; i++)
-        fprintf(fpt, "%lf,%lf,%lf\n", KE[i], PE[i], KE[i] + PE[i]);
-    fclose(fpt);
-}
-
 // will calculate the bodies position over time
 void propagation(Entity ents[], int ents_sz, int n_steps, float dt,
                  const char *output) {
@@ -561,9 +493,6 @@ void propagation(Entity ents[], int ents_sz, int n_steps, float dt,
     Octtree tree;
     RVec3 *acc;
     pad_double loc_max[thread_count];
-    pad_double local_KE[thread_count];
-    pad_double local_PE[thread_count];
-    double *KE, *PE;
 
     create_tree(ents_sz, &tree);
     init_node(&tree);
@@ -576,18 +505,6 @@ void propagation(Entity ents[], int ents_sz, int n_steps, float dt,
 
     acc = malloc(ents_sz * sizeof(RVec3));
     if (acc == NULL) {
-        fprintf(stderr, "Error during memory allocation\n");
-        exit(2);
-    }
-
-    KE = malloc(n_steps * sizeof(double));
-    if (KE == NULL) {
-        fprintf(stderr, "Error during memory allocation\n");
-        exit(2);
-    }
-
-    PE = malloc(n_steps * sizeof(double));
-    if (PE == NULL) {
         fprintf(stderr, "Error during memory allocation\n");
         exit(2);
     }
@@ -623,11 +540,11 @@ void propagation(Entity ents[], int ents_sz, int n_steps, float dt,
                 ents[i].pos.z += ents[i].vel.z * dt;
             }
 
-// #pragma omp single
-//             for (int i = 0; i < ents_sz; i++) {
-//                 fprintf(fpt, "%d,%lf,%lf,%lf,%lf\n", i, ents[i].pos.x,
-//                         ents[i].pos.y, ents[i].pos.z, ents[i].mass);
-//             }
+#pragma omp single
+            for (int i = 0; i < ents_sz; i++) {
+                fprintf(fpt, "%d,%lf,%lf,%lf,%lf\n", i, ents[i].pos.x,
+                        ents[i].pos.y, ents[i].pos.z, ents[i].mass);
+            }
 
             // Build new tree
 #pragma omp single
@@ -649,13 +566,11 @@ void propagation(Entity ents[], int ents_sz, int n_steps, float dt,
                 ents[i].vel.y += acc[i].y * dt / 2.0;
                 ents[i].vel.z += acc[i].z * dt / 2.0;
             }
-            // get_energy(ents, ents_sz, KE + t, PE + t, local_KE, local_PE);
         }
         destroy_mutex(&tree);
     } // pragma
 
     fclose(fpt);
-    save_energy(output, n_steps, KE, PE);
     free(tree.nodes);
     free(acc);
 }

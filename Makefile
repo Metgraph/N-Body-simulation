@@ -11,29 +11,17 @@ $(error Usage: 'make play FILE=<path to csv>')
 endif
 endif
 
-exhaustive:
-	${COMPILER} -Wall -o ${BUILD_DIR}/exhaustive_s serial/exhaustive.c -lm
+exhaustive_serial:
+	${COMPILER} -Wall -o ${BUILD_DIR}/exh_serial serial/exhaustive.c -lm
 
-exhaustivedebug:
-	${COMPILER} -Wall -g -o ${BUILD_DIR}/exhaustive_d serial/exhaustive.c -lm
+exhaustive_serial_debug:
+	${COMPILER} -DRESULTS -Wall -g -o ${BUILD_DIR}/exh_serial_debug serial/exhaustive.c -lm
 
-manualcollapse:
-	${COMPILER} -Wall  -o ${BUILD_DIR}/manual_collapse openmp/manual_collapse.c -lm -fopenmp
+exhaustive_openmp:
+	${COMPILER} -Wall -o ${BUILD_DIR}/exh_mp openmp/exhaustive.c -lm -fopenmp
 
-manualcollapsedebug:
-	${COMPILER} -Wall -g -o ${BUILD_DIR}/manual_collapse_d openmp/manual_collapse.c -lm -fopenmp
-
-collapse:
-	${COMPILER} -Wall -o ${BUILD_DIR}/collapse openmp/collapse.c -lm -fopenmp
-
-collapsedebug:
-	${COMPILER} -Wall -g -o ${BUILD_DIR}/collapse_d openmp/collapse.c -lm -fopenmp
-
-parallelfor:
-	${COMPILER} -Wall -o ${BUILD_DIR}/parallel_for openmp/parallel_for.c -lm -fopenmp
-
-parallelfordebug:
-	${COMPILER} -Wall -g -o ${BUILD_DIR}/parallel_for_d openmp/parallel_for.c -lm -fopenmp
+exhaustive_openmp_debug:
+	${COMPILER} -DRESULTS -Wall -g -o ${BUILD_DIR}/exh_mp_debug openmp/exhaustive.c -lm -fopenmp
 
 barneshut:
 	${COMPILER} -Wall -o ${BUILD_DIR}/barnes-hut serial/barnes-hut.c -lm

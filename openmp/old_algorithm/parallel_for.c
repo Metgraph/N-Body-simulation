@@ -28,7 +28,7 @@ void get_entities(char filename[], Entity **ents, uint *n_ents);
 void count_entities_file(char *filename, uint *n);
 void propagation(Entity ents[], uint ents_sz, int n_steps, float dt,
                  const char *output);
-void acceleration(uint ents_sz, Entity *ents, RVec3 *acc, omp_lock_t *locks);
+void acceleration(uint ents_sz, Entity *ents, RVec3 *acc);
 
 int main(int argc, char *argv[]) {
     if (argc != 7) {
@@ -138,20 +138,21 @@ void get_entities(char filename[], Entity **ents, uint *n_ents) {
     fclose(file);
 }
 
-void acceleration(uint ents_sz, Entity *ents, RVec3 *acc, omp_lock_t *locks) {
+void acceleration(uint ents_sz, Entity *ents, RVec3 *acc) {
 
-    // Azzero prima per evitare race conditions con il collapse
 #   pragma omp for
     for (size_t m1 = 0; m1 < ents_sz; m1++) {
-        acc[m1].x = 0;
-        acc[m1].y = 0;
-        acc[m1].z = 0;
-    }
+        /* printf("Thread %d calculate m: %lu\n", omp_get_thread_num(), m1); */
+        // Per false sharing: acc è condivisa tra tutti i thread allora
+        // decido di scriverci una sola volta per thread solo alla
+        // fine dei calcoli
+        RVec3 local_acc;
 
-#   pragma omp for  // Con collapse fatto esplicitamente è uguale
-    for (size_t i = 0; i < ents_sz * ents_sz; i++) {
-            int m1 = i / ents_sz;
-            int m2 = i % ents_sz;
+        local_acc.x = 0;
+        local_acc.y = 0;
+        local_acc.z = 0;
+
+        for (size_t m2 = 0; m2 < ents_sz; m2++) {
             RVec3 r_vector;
 
             r_vector.x = ents[m2].pos.x - ents[m1].pos.x;
@@ -162,15 +163,13 @@ void acceleration(uint ents_sz, Entity *ents, RVec3 *acc, omp_lock_t *locks) {
                             r_vector.z * r_vector.z + 0.01;
             inv_r3 = pow(inv_r3, -1.5);
 
-            double ax = BIG_G * r_vector.x * inv_r3 * ents[m2].mass;
-            double ay = BIG_G * r_vector.y * inv_r3 * ents[m2].mass;
-            double az = BIG_G * r_vector.z * inv_r3 * ents[m2].mass;
-
-            omp_set_lock(&locks[m1]);
-            acc[m1].x += ax;
-            acc[m1].y += ay;
-            acc[m1].z += az;
-            omp_unset_lock(&locks[m1]);
+            local_acc.x += BIG_G * r_vector.x * inv_r3 * ents[m2].mass;
+            local_acc.y += BIG_G * r_vector.y * inv_r3 * ents[m2].mass;
+            local_acc.z += BIG_G * r_vector.z * inv_r3 * ents[m2].mass;
+        }
+        acc[m1].x = local_acc.x;
+        acc[m1].y = local_acc.y;
+        acc[m1].z = local_acc.z;
     }
 }
 
@@ -178,7 +177,6 @@ void propagation(Entity *ents, uint ents_sz, int n_steps, float dt,
                  const char *output) {
     FILE *fpt;
     RVec3 *acc;
-    omp_lock_t *locks;
 
     acc = malloc(ents_sz * sizeof(RVec3));
     if (acc == NULL) {
@@ -186,25 +184,7 @@ void propagation(Entity *ents, uint ents_sz, int n_steps, float dt,
         exit(2);
     }
 
-	locks = malloc(ents_sz * sizeof(omp_lock_t)); // Fare malloc e poi far azzerare ai thread?
-    if (locks == NULL){
-        fprintf(stderr, "Error during memory allocation into propagation function\n");
-        exit(2);
-    }
-
     fpt = fopen(output, "w");
-
-    // Initial acceleration
-#   pragma omp parallel num_threads(thread_count) // Fork unico
-    {
-#   pragma omp for
-    for (size_t m1_idx = 0; m1_idx < ents_sz; m1_idx++) {
-        omp_init_lock(&locks[m1_idx]);
-    }
-    acceleration(ents_sz, ents, acc, locks);
-    }
-    /* printf("\n"); */
-    //printf("Inizializzazione terminata\n");
 
     // Print to file initial state
     for (size_t entity_idx = 0; entity_idx < ents_sz; entity_idx++) {
@@ -213,10 +193,14 @@ void propagation(Entity *ents, uint ents_sz, int n_steps, float dt,
                 ents[entity_idx].pos.z, ents[entity_idx].mass);
     }
 
+    // Initial acceleration
     // Con il for unico e utilizzando omp for invece di omp parallel for
     // Vengono forkati i thread solo all'inizio del ciclo e riutilizzati
     // invece di avere un fork ad ogni for
-#   pragma omp parallel num_threads(thread_count)
+#   pragma omp parallel num_threads(thread_count) // Fork unico
+    {
+    acceleration(ents_sz, ents, acc);
+
     for (int t = 0; t < n_steps; t++) {
 
         // First 1/2 kick
@@ -237,23 +221,18 @@ void propagation(Entity *ents, uint ents_sz, int n_steps, float dt,
         }
 
         // Save positions
-        // Il primo thread che arriva lo esegue, nowait senza barriera
-        // Non mi preoccupo di scrittura di dati svagliati perchè ogni blocco
-        // ha una barriera implicita alla sua fine e la prossima istruzione
-        // è accelerations che oltre a modificare le accelerazioni (che qui non servono)
-        // non ha altri side effects
-#       pragma omp single nowait
-        for (size_t entity_idx = 0; entity_idx < ents_sz; entity_idx++) {
-            //printf("Write file thread: %d\n", omp_get_thread_num());
-
-            fprintf(fpt, "%lu,%lf,%lf,%lf,%lf\n", entity_idx,
-                ents[entity_idx].pos.x, ents[entity_idx].pos.y,
-                ents[entity_idx].pos.z, ents[entity_idx].mass);
-        }
+        // Il primo thread che arriva lo esegue
+//#       pragma omp single
+//        for (size_t entity_idx = 0; entity_idx < ents_sz; entity_idx++) {
+//            //printf("Write file thread: %d\n", omp_get_thread_num());
+//
+//            fprintf(fpt, "%lu,%lf,%lf,%lf,%lf\n", entity_idx,
+//                ents[entity_idx].pos.x, ents[entity_idx].pos.y,
+//                ents[entity_idx].pos.z, ents[entity_idx].mass);
+//        }
 
         // Update accelerations
-        acceleration(ents_sz, ents, acc, locks);
-        /* printf("\n"); */
+        acceleration(ents_sz, ents, acc);
 
         // Second 1/2 kick
 #       pragma omp for
@@ -264,6 +243,7 @@ void propagation(Entity *ents, uint ents_sz, int n_steps, float dt,
             ents[m1].vel.z += acc[m1].z * dt / 2.0;
         }
     }
+    } // pragma
     fclose(fpt);
     free(acc);
 }
