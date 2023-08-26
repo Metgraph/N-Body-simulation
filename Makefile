@@ -11,10 +11,10 @@ $(error Usage: 'make play FILE=<path to csv>')
 endif
 endif
 
-exhaustive_serial:
+exhaustive:
 	${COMPILER} -Wall -o ${BUILD_DIR}/exh_serial serial/exhaustive.c -lm
 
-exhaustive_serial_debug:
+exhaustive_debug:
 	${COMPILER} -DRESULTS -Wall -g -o ${BUILD_DIR}/exh_serial_debug serial/exhaustive.c -lm
 
 exhaustive_openmp:
@@ -25,11 +25,27 @@ exhaustive_openmp_debug:
 
 barneshut:
 	${COMPILER} -Wall -o ${BUILD_DIR}/barnes-hut serial/barnes-hut.c -lm
+
+barneshut_debug:
+	${COMPILER} -DRESULTS -Wall -o ${BUILD_DIR}/barnes-hut-debug serial/barnes-hut.c -lm
+
+barneshut_openmp:
 	${COMPILER} -Wall -o ${BUILD_DIR}/barnes-hut-omp openmp/barnes-hut.c -lm -fopenmp
 
-barneshutdebug:
-	${COMPILER} -Wall -g -o ${BUILD_DIR}/barnes-hut serial/barnes-hut.c -lm
-	${COMPILER} -Wall -g -o ${BUILD_DIR}/barnes-hut-omp openmp/barnes-hut.c -lm -fopenmp
+barneshut_openmp_debug:
+	${COMPILER} -DRESULTS -Wall -o ${BUILD_DIR}/barnes-hut-omp-debug openmp/barnes-hut.c -lm -fopenmp
+
+all:
+	${COMPILER} -Wall -o ${BUILD_DIR}/exh_serial serial/exhaustive.c -lm
+	${COMPILER} -Wall -o ${BUILD_DIR}/exh_mp openmp/exhaustive.c -lm -fopenmp
+	${COMPILER} -Wall -o ${BUILD_DIR}/barnes-hut serial/barnes-hut.c -lm
+	${COMPILER} -Wall -o ${BUILD_DIR}/barnes-hut-omp openmp/barnes-hut.c -lm -fopenmp
+
+all_debug:
+	${COMPILER} -DRESULTS -Wall -g -o ${BUILD_DIR}/exh_serial_debug serial/exhaustive.c -lm
+	${COMPILER} -DRESULTS -Wall -g -o ${BUILD_DIR}/exh_mp_debug openmp/exhaustive.c -lm -fopenmp
+	${COMPILER} -DRESULTS -Wall -o ${BUILD_DIR}/barnes-hut-debug serial/barnes-hut.c -lm
+	${COMPILER} -DRESULTS -Wall -o ${BUILD_DIR}/barnes-hut-omp-debug openmp/barnes-hut.c -lm -fopenmp
 
 cuda_barneshut:
 	${CUDA_COMPILER} -o ${BUILD_DIR}/barnes-hut-cuda cuda/definitive_barnes-hut/barnes-hut.cu -lm -O2
