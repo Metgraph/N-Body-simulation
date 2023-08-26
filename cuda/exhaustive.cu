@@ -68,6 +68,13 @@ int main(int argc, char *argv[]) {
     free(velocities);
 }
 
+
+/*
+ *  Check error after cuda functions.
+ *
+ *  @param error        Cuda error message
+ *  @param *message     Message to print if there's an error
+ */
 __host__
 void cuda_check_error(cudaError_t error, const char *message) {
     if (error != cudaSuccess) {
@@ -76,6 +83,16 @@ void cuda_check_error(cudaError_t error, const char *message) {
     }
 }
 
+/*
+ * Main function for execute the simulation
+ *
+ * @param *h_positions  Bodies positions e masses
+ * @param *h_velocities Initial velocities
+ * @param ents_sz       Total number of bodies
+ * @param n_steps       Total of steps for simulation
+ * @param dt            Time interval between one step and the next
+ * @param *output       Output file name for simulation results (compile with -DRESULTS)
+ */
 __host__
 void propagation(double *h_positions, double *h_velocities, uint ents_sz, int n_steps, double dt, const char *output) {
     FILE *fpt;
@@ -151,6 +168,9 @@ void propagation(double *h_positions, double *h_velocities, uint ents_sz, int n_
 
 /**
  * Estimate the number of bodies by counting the lines of the file
+ *
+ * @params *filename    Input filename
+ * @params *n           Pointer on wich to save the count
  */
 __host__
 void count_entities_file(char *filename, uint *n){
@@ -179,6 +199,9 @@ void count_entities_file(char *filename, uint *n){
 
 /**
  * Allocate array for doubles and check for errors
+ *
+ * @param **pointer     Destination pointer
+ * @param quantity      Size of malloc
  */
 __host__
 void safe_malloc_double(double **pointer, int quantity) {
@@ -190,7 +213,12 @@ void safe_malloc_double(double **pointer, int quantity) {
 }
 
 /**
- * Read file and generate an arrays for masses, positions and velocities for the bodies
+ * Read file and generate an array of Entity
+ *
+ * @param   filename        Input filename
+ * @param   *n_ents         Storage for bodies count
+ * @param   **positions     Storage for bodies positions
+ * @param   **velocities    Storage for bodies velocities
  */
 __host__
 void get_entities(char filename[], uint *n_ents, double **positions, double **velocities) {
@@ -230,6 +258,14 @@ void get_entities(char filename[], uint *n_ents, double **positions, double **ve
     fclose(file);
 }
 
+/*
+ * Calculate bodies accelerations
+ *
+ * @param positions     Bodies positions
+ * @param *acc          Array for store new acceleration
+ * @param ents_sz       Number of bodies in the simulation
+ * @param step          Number of current iteration into simulation
+ */
 __global__
 void acceleration(double *positions, double *acc, uint ents_sz, int step) {
     extern __shared__ double4 shPositions[];
@@ -252,8 +288,6 @@ void acceleration(double *positions, double *acc, uint ents_sz, int step) {
     // Local acceleration
     l_acc = {0.0, 0.0, 0.0};
     myId = blockIdx.x * blockDim.x + threadIdx.x;
-
-    //int count = 0;
 
     if (myId < ents_sz) {
         // Keep thread's body positions to avoid access to main memroy
@@ -299,6 +333,14 @@ void acceleration(double *positions, double *acc, uint ents_sz, int step) {
     }
 }
 
+/*
+ * Update bodies velocities
+ *
+ * @param *acc      Accelerations array
+ * @param *vel      Velocities array
+ * @param ents_sz   Total number of bodies
+ * @param dt        Time interval beetween one step and the next
+ */
 __global__
 void update_velocities(double *acc, double *vel, uint ents_sz, double dt) {
     int myId;
@@ -312,6 +354,15 @@ void update_velocities(double *acc, double *vel, uint ents_sz, double dt) {
     }
 }
 
+/*
+ * Update bodies positions
+ *
+ * @param *gPos             Bodies positions buffer
+ * @param *gVelocities      Velocities array
+ * @param ents_sz           Total number of bodies
+ * @param dt                Time interval beetween one step and the next
+ * @param step              Number of current iteration into simulation
+ */
 __global__
 void update_positions(double4 *gPos, double3 *gVelocities, uint ents_sz, double dt, int step) {
     int myId;

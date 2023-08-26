@@ -186,7 +186,7 @@ void acceleration(uint ents_sz, Entity *ents, RVec3 *acc) {
  * @param *ents     Array with the bodies information
  * @param ents_sz   Total number of bodies
  * @param n_steps   Total of steps for simulation
- * @param dt        Time interval between one step and the next
+ * @param dt        Time interval beetween one step and the next
  * @param *output    Output file name for simulation results (compile with -DRESULTS)
  */
 void propagation(Entity *ents, uint ents_sz, int n_steps, float dt,
@@ -204,7 +204,6 @@ void propagation(Entity *ents, uint ents_sz, int n_steps, float dt,
 
     // Calculate initial acceleration
     acceleration(ents_sz, ents, acc);
-
 
 #ifdef RESULTS
     fpt = fopen(output, "w");
