@@ -126,7 +126,6 @@ void propagation(double *h_positions, double *h_velocities, uint ents_sz, int n_
     error = cudaMemcpy(d_velocities, h_velocities, ents_sz * 3 * sizeof(double), cudaMemcpyHostToDevice);
     cuda_check_error(error, "Host to Device copy velocities\n");
 
-    fpt = fopen(output, "w");
 
     acceleration<<<grid, block, shsz * sizeof(double) * 4>>>(d_positions, d_accelerations, ents_sz, 0);
     cudaDeviceSynchronize();
@@ -149,21 +148,24 @@ void propagation(double *h_positions, double *h_velocities, uint ents_sz, int n_
         cudaDeviceSynchronize();
     }
 
+#ifdef RESULTS
     double *h_pos;
-    safe_malloc_double(&h_pos, ents_sz * 4 * n_steps);
-    error = cudaMemcpy(h_pos, d_positions, (size_t)(ents_sz * 4 * sizeof(double) * n_steps), cudaMemcpyDeviceToHost);
+    safe_malloc_double(&h_pos, ents_sz * 4 * (n_steps+1));
+    error = cudaMemcpy(h_pos, d_positions, (size_t)(ents_sz * 4 * sizeof(double) * (n_steps+1)), cudaMemcpyDeviceToHost);
     cuda_check_error(error, "Device to Host copy positions\n");
     double4 *h_poss = (double4 *) h_pos;
 
-    for (int i = 0; i < ents_sz * n_steps; i++)
+    fpt = fopen(output, "w");
+    for (int i = 0; i < ents_sz * (n_steps+1); i++)
         fprintf(fpt, "%d,%lf,%lf,%lf,%lf\n", i%ents_sz, h_poss[i].x, h_poss[i].y, h_poss[i].z, h_poss[i].w);
-
+    fclose(fpt);
     free(h_pos);
+#endif
+
     cudaFree(d_positions);
     cudaFree(d_velocities);
     cudaFree(d_accelerations);
 
-    fclose(fpt);
 }
 
 /**
