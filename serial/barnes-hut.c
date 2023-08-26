@@ -1,4 +1,3 @@
-// https://lewiscoleblog.com/barnes-hut
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,31 +19,33 @@ typedef struct {
     double mass;
 } Entity;
 
-// use int instead of uint for indexs so -1 can be used as a sort of null value
 typedef struct {
-    uint ents;       // entities in this section (numero figli del nodo - da
-                     // controllare)
-    double mass;     // massa dei figli
-    RVec3 center;    // mass center media ponderata in base alla massa
-    int parent;      // index of parent
-    int children[8]; // indexs of children
+    uint ents;       // Entities in this section
+    double mass;     // Total mass of children
+    RVec3 center;    // Mass of node
+    int parent;      // Index of parent
+    int children[8]; // Indeces of children
 } Octnode;
 
-// use int for same reason commented above Octnode and to avoid to get number
-// higher than int max value
 typedef struct {
-    int sz;        // number of total slot in array
-    int firstfree; // first location free
+    int sz;         // Total available space for nodes
+    int firstfree;  // First free location
     int root;
-    double max; // Root border lenght
+    double max;     // Lenght of the root border
     Octnode *nodes;
 } Octtree;
 
 // const double BIG_G = 6.67e-11;
 const double BIG_G = 1.0;
-const double THETA = 0.5; // Theta = 0: senza approssimazione
+const double THETA = 0.5;
 
-// TODO put in a common file
+/**
+ * Read file and generate an array of Entity
+ *
+ * @param   filename    Input filename
+ * @param   **ents      Array for bodies information storage
+ * @return  Total number of bodies
+ */
 uint get_entities(char filename[], Entity **ents) {
     Entity e_buff;
     int status;
@@ -59,7 +60,6 @@ uint get_entities(char filename[], Entity **ents) {
         return 0;
     }
 
-    // TODO Check for error in allocation
     ret = (Entity *)malloc(1 * sizeof(Entity));
 
     size = 0;
@@ -71,7 +71,6 @@ uint get_entities(char filename[], Entity **ents) {
                        &e_buff.vel.y, &e_buff.vel.z, &e_buff.mass)) == 7) {
         size++;
         if (ret_size < size) {
-            // TODO Check for error in allocation
             ret_size *= 2;
             ret = (Entity *)realloc((void *)ret, ret_size * sizeof(Entity));
         }
@@ -92,69 +91,26 @@ uint get_entities(char filename[], Entity **ents) {
     return size;
 }
 
-void print_tree_rec(Octtree *tree, int id, char *space, uint depth) {
-    Octnode *node = &tree->nodes[id];
-    // how much divide
-    uint temp = 1 << depth;
-    double border = (tree->max) / (double)temp;
-    printf("%sid: %d, (x:%lf, y:%lf, z:%lf), border: %lf\n", space, id,
-           node->center.x, node->center.y, node->center.z, border);
-    if (node->ents > 1) {
-
-        int i;
-        for (i = depth * 4; i < depth * 4 + 4; i++) {
-            space[i] = ' ';
-        }
-        space[i] = '\0';
-        for (int i = 0; i < 8; i++) {
-            if (node->children[i] > -1) {
-                print_tree_rec(tree, node->children[i], space, depth + 1);
-            }
-        }
-        space[depth * 4] = '\0';
-    }
-}
-
-// used for debug
-void print_tree(Octtree *tree) {
-    uint sz_space = 4 * 40;
-    char *space = malloc(sz_space * sizeof(char));
-    space[0] = '\0';
-    print_tree_rec(tree, tree->root, space, 0);
-    free(space);
-}
-
-void print_tree_indented(Octtree *tree, Octnode *node, int tabs, int pos) {
-    printf("Body position %d -> ", pos);
-    if (node->ents == 1) {
-        printf("Total ents: %d, parent: %d\n", node->ents, node->parent);
-        return;
-    }
-    printf("Total ents: %d, parent: %d\n", node->ents, node->parent);
-    for (int i = 0; i < 8; i++) {
-        if (node->children[i] == -1) {
-            for (int j = 0; j < tabs; j++)
-                printf("\t|");
-            printf("Child %d is empty\n", i);
-        } else {
-            for (int j = 0; j < tabs; j++)
-                printf("\t|");
-            printf("Child %d: ", i);
-            print_tree_indented(tree, &tree->nodes[node->children[i]], tabs + 1,
-                                node->children[i]);
-        }
-    }
-}
-
+/*
+ * Calculate Euclidean distance beetween two bodies
+ *
+ * @param r1    Coordinates of first body
+ * @param r2    Coordinates of second body
+ * @return      Distance
+ */
 double get_distance(RVec3 *r1, RVec3 *r2) {
     return sqrt(pow(r1->x - r2->x, 2) + pow(r1->y - r2->y, 2) +
                 pow(r1->z - r2->z, 2));
 }
 
-// get the index of branch where body will be placed.
-// Center is the center of volume of branch. It will calculate the center of
-// next branch border_size contains the border size of the current branch volume
-// (so the volume is border_size^3)
+/*
+ * Calculate in wich branch (child index) where the body will be placed into node.
+ *
+ * @param *pos          Body positions (x, y, z)
+ * @param *center       Center of the node
+ * @param *border_size  Total lenght of node's border
+ * @return              Body location
+ */
 uint get_indx_loc(RVec3 *pos, RVec3 *center, double *border_size) {
     int indx;
     int x, y, z;
@@ -164,8 +120,8 @@ uint get_indx_loc(RVec3 *pos, RVec3 *center, double *border_size) {
     y = pos->y >= center->y;
     x = pos->x >= center->x;
 
-    indx = z * 4 + y * 2 +
-           x; // Posizione all'interno di uno degli 8 quadranti del cubo
+    // Position inside one of the 8 box of the node
+    indx = z * 4 + y * 2 + x;
 
     // Calculate the new center
     center->x += x ? bord_div4 : -(bord_div4);
@@ -176,12 +132,21 @@ uint get_indx_loc(RVec3 *pos, RVec3 *center, double *border_size) {
     return indx;
 }
 
+/*
+ * Realloc nodes space.
+ *
+ * @param *tree     Tree info struct
+ */
 void double_Octtree(Octtree *tree) {
     tree->sz *= 2;
     tree->nodes = realloc(tree->nodes, tree->sz * sizeof(Octnode));
 }
 
-// Set empty node
+/*
+ * Initialize empty node
+ *
+ * @param *node     The node to inizialize
+ */
 void init_node(Octnode *node) {
     node->center.x = 0;
     node->center.y = 0;
@@ -194,15 +159,20 @@ void init_node(Octnode *node) {
     }
 }
 
-// Add a entity in the tree
-// creating all the necessary branches
+/*
+ * Add a entity in the tree creating all the necessary branches
+ *
+ * @param *tree     Tree info struct
+ * @param *ent      The body to insert
+ * @param id        Body's index into nodes array
+ */
 void add_ent(Octtree *tree, Entity *ent, int id) {
     // allocated is used as a boolean
     int allocated, node_indx, body_pos;
     Octnode *node;
     double border_size;
     RVec3 volume_center;
-    // set init value
+
     allocated = 0;
     // keep last visited node index
     node_indx = tree->root;
@@ -223,7 +193,7 @@ void add_ent(Octtree *tree, Entity *ent, int id) {
             allocated = 1;
         } else {
             // if the location is occupied by a body-leaf
-            // [leaf, leaf, leaf, ..., root, branch, branch, ...]
+            // e.g. [leaf, leaf, leaf, ..., root, branch, branch, ...]
             if (node->children[body_pos] < tree->root) {
                 // other is the other leaf
                 RVec3 other_center = volume_center;
@@ -238,8 +208,6 @@ void add_ent(Octtree *tree, Entity *ent, int id) {
                 while (body_pos == other_indx) {
                     // double up the space if tree is full
                     if (tree->firstfree >= tree->sz) {
-                        printf(
-                            "WARNING: Sto allargando la memoria dell'albero\n");
                         double_Octtree(tree);
                         // update the pointer to new address
                         node = &tree->nodes[node_indx];
@@ -288,33 +256,46 @@ void add_ent(Octtree *tree, Entity *ent, int id) {
         }
     }
 
-    // Verificare: a sinistra ci sono le foglie ma sono in realtà i pianeti
     tree->nodes[id].center = ent->pos;
     tree->nodes[id].mass = ent->mass;
     tree->nodes[id].ents = 1;
     tree->nodes[id].parent = node_indx;
 }
 
-// Add the entities in the tree
-// The entities are located in the first positions, their position in the tree
-// array is the same position in the ents array. The tree is not ready to use,
-// some branch values are not set. Use set_branch_value to complete the tree
+/*
+ * Add the entities in the tree
+ *
+ * @param *tree     Tree info struct
+ * @param ents[]    Array with bodies data
+ * @param ents_sz   Total number of bodies
+ */
 void add_ents(Octtree *tree, Entity ents[], int ents_sz) {
     for (int i = 0; i < ents_sz; i++) {
         add_ent(tree, &ents[i], i);
     }
 }
 
+/*
+ * Recursively calculate the center of mass for each node of the tree.
+ * The calculation is executed with a post-order tree traversal.
+ *
+ * @param *tree     Tree info struct
+ * @param *node     The node for which the calculation is on
+ */
 void center_of_mass(Octtree *tree, Octnode *node) {
     Octnode *child;
     double new_mass;
 
+    // The node is a leaf
     if (node->ents == 1)
         return;
+
     for (int n = 0; n < 8; n++) {
         if (node->children[n] != -1)
             center_of_mass(tree, &tree->nodes[node->children[n]]);
     }
+
+    // On return from each child calculate the mass
     for (int n = 0; n < 8; n++) {
         if (node->children[n] != -1) {
             child = &tree->nodes[node->children[n]];
@@ -323,8 +304,10 @@ void center_of_mass(Octtree *tree, Octnode *node) {
 
             node->center.x = (child->center.x * child->mass / new_mass) +
                              (node->center.x * node->mass / new_mass);
+
             node->center.y = (child->center.y * child->mass / new_mass) +
                              (node->center.y * node->mass / new_mass);
+
             node->center.z = (child->center.z * child->mass / new_mass) +
                              (node->center.z * node->mass / new_mass);
 
@@ -333,6 +316,13 @@ void center_of_mass(Octtree *tree, Octnode *node) {
     }
 }
 
+/*
+ * Find the maximum distance beetween the bodies and the center.
+ *
+ * @params ents[]   Array with bodies data
+ * @params ents_sz  Total number of bodies
+ * @params *max     Where to save the maximum
+ */
 void get_bounding_box(Entity ents[], int ents_sz, double *max) {
     *max = 0.0;
 
@@ -341,33 +331,35 @@ void get_bounding_box(Entity ents[], int ents_sz, double *max) {
         *max = fabs(ents[i].pos.y) > *max ? fabs(ents[i].pos.y) : *max;
         *max = fabs(ents[i].pos.z) > *max ? fabs(ents[i].pos.z) : *max;
     }
+
+    // The max is double to consider also the space from the center
+    // in the opposite direction
     *max *= 2;
 }
 
-// create tree struct and add root node
-void init_tree(Entity ents[], int ents_sz, Octtree *tree) {
-    // calculate the minimum quantity of branch required to save ents_sz bodies
-    // In pratica è ents_sz * 2/3
-    int sz = (ents_sz - 2) / 3 + 1; // = round up (ents_sz-1)/3
-    sz *= 2; // double the size to leave some space without need to reallocate
-
-    // add the space required for the bodies
-    sz += ents_sz;
+/*
+ * Create tree struct and initialize root node
+ *
+ * @param ents_sz   Total number of bodies
+ * @param *tree     Tree info struct
+ */
+void create_tree(int ents_sz, Octtree *tree) {
     tree->firstfree = ents_sz + 1;
-    tree->sz = sz;
+    tree->sz = ents_sz * 5;
     tree->root = ents_sz;
-    tree->nodes = malloc(sz * sizeof(Octnode));
+    tree->nodes = malloc(tree->sz * sizeof(Octnode));
     Octnode root;
     init_node(&root);
     tree->nodes[ents_sz] = root;
 }
 
-void create_tree(Entity ents[], int ents_sz, Octtree *tree) {
-    // get bounding box of bodies
-    init_tree(ents, ents_sz, tree);
-}
-
-// calculate calculation caused by another body
+/*
+ * Calculate acceleration beetween two bodies
+ *
+ * @param *ent  Main body
+ * @param *node Node at a sufficient distance for the calculation
+ * @param *acc  New acceleration for ent
+ */
 void calculate_acceleration(Octnode *ent, Octnode *node, RVec3 *acc) {
 
     RVec3 r_vector;
@@ -385,19 +377,37 @@ void calculate_acceleration(Octnode *ent, Octnode *node, RVec3 *acc) {
     acc->z += BIG_G * r_vector.z * inv_r3 * node->mass;
 }
 
-// calculate body acceleration - TODO: trasformare in iterativo
+/*
+ * Explore the tree to perform acceleration calculations for the selected body_pos
+ *
+ * @param *tree         Tree info struct
+ * @param *node_indx    Index of the body in examination
+ * @param *id           Index of main node on wich perform calculation
+ * @param *acc          Acceleration for the main node
+ * @param *border       Border of current node
+ */
 void get_acceleration_rec(Octtree *tree, int node_indx, int id, RVec3 *acc,
                           double border) {
     double distance;
-    Octnode *ent = &tree->nodes[id];
-    Octnode *node = &tree->nodes[node_indx];
+    int indx;
+    Octnode *ent;
+    Octnode *node;
+
+    // Owner of calculation
+    ent = &tree->nodes[id];
+    // Node in examination
+    node = &tree->nodes[node_indx];
+
     distance = get_distance(&node->center, &ent->center);
 
+    // If distance beetween body and node is less than THETA
+    // or the node is a leaf calculate acceleration
     if (border / distance < THETA || node->ents == 1) {
         calculate_acceleration(ent, node, acc);
-    } else {
+
+    } else { // Descend into tree
         for (int i = 0; i < 8; i++) {
-            int indx = node->children[i];
+            indx = node->children[i];
             if (indx > -1 && indx != id) {
                 get_acceleration_rec(tree, indx, id, acc, border / 2);
             }
@@ -405,24 +415,40 @@ void get_acceleration_rec(Octtree *tree, int node_indx, int id, RVec3 *acc,
     }
 }
 
-// call recursive function get_acceleration_rec
+/*
+ * Call recursive function get_acceleration_rec for each body
+ *
+ * @param *tree     Tree info struct
+ * @param *acc      Array for the new accelerations
+ * @param ents_sz   Total number of bodies
+ */
 void get_acceleration(Octtree *tree, RVec3 *acc, int ents_sz) {
     // RVec3 acc = {0, 0, 0};
     for (int i = 0; i < ents_sz; i++) {
         acc[i].x = 0;
         acc[i].y = 0;
         acc[i].z = 0;
+        // The body in `i` position start the descent from the root
         get_acceleration_rec(tree, tree->root, i, &acc[i], tree->max);
     }
 }
 
-// will calculate the bodies position over time
+/*
+ * Main function for execute the simulation
+ *
+ * @param ents[]     Array with the bodies information
+ * @param ents_sz   Total number of bodies
+ * @param n_steps   Total of steps for simulation
+ * @param dt        Time interval between one step and the next
+ * @param *output    Output file name for simulation results (compile with -DRESULTS)
+ */
 void propagation(Entity ents[], int ents_sz, int n_steps, float dt,
                  const char *output) {
+#ifdef RESULTS
     FILE *fpt;
+#endif
     Octtree tree;
-    create_tree(ents, ents_sz, &tree);
-    fpt = fopen(output, "w");
+    create_tree(ents_sz, &tree);
     RVec3 *acc;
 
     acc = malloc(ents_sz * sizeof(RVec3));
@@ -431,13 +457,16 @@ void propagation(Entity ents[], int ents_sz, int n_steps, float dt,
         exit(2);
     }
 
+#ifdef RESULTS
+    fpt = fopen(output, "w");
     // Initial positions
     for (size_t i = 0; i < ents_sz; i++) {
         fprintf(fpt, "%lu,%lf,%lf,%lf,%lf\n", i, ents[i].pos.x, ents[i].pos.y,
                 ents[i].pos.z, ents[i].mass);
     }
+#endif
 
-    // Initialize system
+    // Initialize the tree
     get_bounding_box(ents, ents_sz, &tree.max);
     add_ents(&tree, ents, ents_sz);
     center_of_mass(&tree, &tree.nodes[tree.root]);
@@ -457,11 +486,13 @@ void propagation(Entity ents[], int ents_sz, int n_steps, float dt,
             ents[i].pos.y += ents[i].vel.y * dt;
             ents[i].pos.z += ents[i].vel.z * dt;
 
+#ifdef RESULTS
             fprintf(fpt, "%d,%lf,%lf,%lf,%lf\n", i, ents[i].pos.x,
                     ents[i].pos.y, ents[i].pos.z, ents[i].mass);
+#endif
         }
 
-        // Build new tree
+        // Reset tree
         init_node(&tree.nodes[tree.root]);
         tree.firstfree = tree.root + 1;
         get_bounding_box(ents, ents_sz, &tree.max);
@@ -478,7 +509,9 @@ void propagation(Entity ents[], int ents_sz, int n_steps, float dt,
         }
     }
 
+#ifdef RESULTS
     fclose(fpt);
+#endif
     free(tree.nodes);
     free(acc);
 }

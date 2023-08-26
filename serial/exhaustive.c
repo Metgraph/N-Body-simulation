@@ -72,6 +72,9 @@ int main(int argc, char *argv[]) {
 
 /**
  * Estimate the number of bodies by counting the lines of the file
+ *
+ * @params *filename    Input filename
+ * @params *n           Pointer on wich to save the count
  */
 void count_entities_file(char *filename, uint *n) {
     FILE *file;
@@ -99,6 +102,10 @@ void count_entities_file(char *filename, uint *n) {
 
 /**
  * Read file and generate an array of Entity
+ *
+ * @param   filename    Input filename
+ * @param   **ents      Array for bodies information storage
+ * @param   *n_ents     Storage for bodies count
  */
 void get_entities(char filename[], Entity **ents, uint *n_ents) {
     Entity e_buff;
@@ -138,6 +145,13 @@ void get_entities(char filename[], Entity **ents, uint *n_ents) {
     fclose(file);
 }
 
+/*
+ * Calculate bodies accelerations
+ *
+ * @param ents_sz   Number of bodies in the simulation
+ * @param *ents     Array with bodies informations
+ * @param *acc      Array for store new acceleration
+ */
 void acceleration(uint ents_sz, Entity *ents, RVec3 *acc) {
 
     for (size_t m1 = 0; m1 < ents_sz; m1++) {
@@ -149,6 +163,7 @@ void acceleration(uint ents_sz, Entity *ents, RVec3 *acc) {
         for (size_t m2 = 0; m2 < ents_sz; m2++) {
             RVec3 r_vector;
 
+            // Distance beetween body m1 and body m2
             r_vector.x = ents[m2].pos.x - ents[m1].pos.x;
             r_vector.y = ents[m2].pos.y - ents[m1].pos.y;
             r_vector.z = ents[m2].pos.z - ents[m1].pos.z;
@@ -157,6 +172,7 @@ void acceleration(uint ents_sz, Entity *ents, RVec3 *acc) {
                             r_vector.z * r_vector.z + 0.01;
             inv_r3 = pow(inv_r3, -1.5);
 
+            // Update acceleration
             acc[m1].x += BIG_G * r_vector.x * inv_r3 * ents[m2].mass;
             acc[m1].y += BIG_G * r_vector.y * inv_r3 * ents[m2].mass;
             acc[m1].z += BIG_G * r_vector.z * inv_r3 * ents[m2].mass;
@@ -164,9 +180,20 @@ void acceleration(uint ents_sz, Entity *ents, RVec3 *acc) {
     }
 }
 
+/*
+ * Main function for execute the simulation
+ *
+ * @param *ents     Array with the bodies information
+ * @param ents_sz   Total number of bodies
+ * @param n_steps   Total of steps for simulation
+ * @param dt        Time interval between one step and the next
+ * @param *output    Output file name for simulation results (compile with -DRESULTS)
+ */
 void propagation(Entity *ents, uint ents_sz, int n_steps, float dt,
                  const char *output) {
+#ifdef RESULTS
     FILE *fpt;
+#endif
     RVec3 *acc;
 
     acc = malloc(ents_sz * sizeof(RVec3));
@@ -175,17 +202,19 @@ void propagation(Entity *ents, uint ents_sz, int n_steps, float dt,
         exit(2);
     }
 
-    // Initial acceleration
+    // Calculate initial acceleration
     acceleration(ents_sz, ents, acc);
 
-    fpt = fopen(output, "w");
 
+#ifdef RESULTS
+    fpt = fopen(output, "w");
     // Print to file initial state
     for (size_t i = 0; i < ents_sz; i++) {
         fprintf(fpt, "%lu,%lf,%lf,%lf,%lf\n", i,
                 ents[i].pos.x, ents[i].pos.y,
                 ents[i].pos.z, ents[i].mass);
     }
+#endif
 
     for (int t = 0; t < n_steps; t++) {
 
@@ -202,10 +231,12 @@ void propagation(Entity *ents, uint ents_sz, int n_steps, float dt,
             ents[i].pos.y += ents[i].vel.y * dt;
             ents[i].pos.z += ents[i].vel.z * dt;
 
+#ifdef RESULTS
             // Save positions
             fprintf(fpt, "%lu,%lf,%lf,%lf,%lf\n", i,
                     ents[i].pos.x, ents[i].pos.y,
                     ents[i].pos.z, ents[i].mass);
+#endif
         }
 
         // Update accelerations
@@ -218,7 +249,9 @@ void propagation(Entity *ents, uint ents_sz, int n_steps, float dt,
             ents[m1].vel.z += acc[m1].z * dt / 2.0;
         }
     }
+#ifdef RESULTS
     fclose(fpt);
+#endif
     free(acc);
 }
 
