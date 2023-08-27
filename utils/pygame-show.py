@@ -109,14 +109,17 @@ def play(
             pygame.draw.circle(screen, col, (x, y), 3, width=0) # circonferenza
             pygame.draw.circle(screen, (0, 0, 0), (x, y), 2, width=0) # interno
 
-        # Aggiornamento del frame corrente
-        current_frame += 1
 
         # Aggiornamento della finestra di gioco
         pygame.display.flip()
 
         # Limitazione del framerate
         clock.tick(30*10)
+        #pygame.image.save(screen, f"images/2022-{current_frame}.png")
+
+        # Aggiornamento del frame corrente
+        current_frame += 1
+
 
     # Uscita dal gioco
     pygame.quit()
