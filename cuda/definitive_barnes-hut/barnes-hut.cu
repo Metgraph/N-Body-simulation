@@ -45,6 +45,7 @@ typedef struct {
     double border;
 } Stacknode;
 
+
 // const double BIG_G = 6.67e-11;
 const double BIG_G = 1;
 const double THETA = 0.5; // 1;
@@ -489,7 +490,7 @@ __device__ int get_next_node(int curr_node, int parent, int children[], int last
 }
 
 __global__ void acceleration_w_stack(Octtree *tree, Entities *ents,
-                                     int ents_sz, int* sorted_nodes, double *acc_buff, int total_mem) {
+                                     int ents_sz, int* sorted_nodes, double *acc_buff, size_t total_mem) {
     // TODO check memory dimensions while adding values in the stack
     extern __shared__ Stacknode stacks[];
     // change 32 with warp size
@@ -1049,7 +1050,8 @@ int main(int argc, char *argv[])
     #ifdef PRINT_KERNEL_TIME
     clock_gettime(CLOCK_REALTIME, &s);
     #endif
-    acceleration_w_stack<<<(n_ents-1)/(32*2)+1,32*2, 48*1024>>>(d_tree, d_ents_struct, n_ents, d_sorted_nodes, d_acc, 48*1024);
+    
+    acceleration_w_stack<<<(n_ents-1)/(cuda_prop.warpSize*2)+1,cuda_prop.warpSize*2, cuda_prop.sharedMemPerBlock>>>(d_tree, d_ents_struct, n_ents, d_sorted_nodes, d_acc, cuda_prop.sharedMemPerBlock);
     cuda_err = cudaDeviceSynchronize();
     #ifdef PRINT_KERNEL_TIME
     clock_gettime(CLOCK_REALTIME, &e);
@@ -1106,8 +1108,8 @@ int main(int argc, char *argv[])
         #ifdef PRINT_KERNEL_TIME
         clock_gettime(CLOCK_REALTIME, &s);
         #endif
-        for(int i=n_ents*3; i>1;i=((i-1)/2048+1)){
-            get_bounding_box<<<(i-1)/2048+1, max_threads, max_threads * sizeof(double)>>>(d_reduce_in, i, d_reduce_out);
+        for(int i=n_ents*3; i>1;i=((i-1)/(max_threads*2)+1)){
+            get_bounding_box<<<(i-1)/(max_threads*2)+1, max_threads, max_threads * sizeof(double)>>>(d_reduce_in, i, d_reduce_out);
             cuda_err = cudaDeviceSynchronize();
             check_error(cuda_err);
             double *temp=d_reduce_out;
@@ -1159,7 +1161,7 @@ int main(int argc, char *argv[])
         #ifdef PRINT_KERNEL_TIME
         clock_gettime(CLOCK_REALTIME, &s);
         #endif
-        acceleration_w_stack<<<(n_ents-1)/(32*2)+1,32*2, 48*1024>>>(d_tree, d_ents_struct, n_ents, d_sorted_nodes, d_acc, 48*1024);
+        acceleration_w_stack<<<(n_ents-1)/(cuda_prop.warpSize*2)+1,cuda_prop.warpSize*2, cuda_prop.sharedMemPerBlock>>>(d_tree, d_ents_struct, n_ents, d_sorted_nodes, d_acc, cuda_prop.sharedMemPerBlock);
         cuda_err = cudaDeviceSynchronize();
         #ifdef PRINT_KERNEL_TIME
         clock_gettime(CLOCK_REALTIME, &e);
