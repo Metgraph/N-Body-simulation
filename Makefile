@@ -48,10 +48,10 @@ all_debug:
 	${COMPILER} -DRESULTS -Wall -g -o ${BUILD_DIR}/barnes-hut-omp-debug openmp/barnes-hut.c -lm -fopenmp
 
 cuda_barneshut:
-	${CUDA_COMPILER} -o ${BUILD_DIR}/barnes-hut-cuda cuda/definitive_barnes-hut/barnes-hut.cu -lm -O2
+	${CUDA_COMPILER} -o ${BUILD_DIR}/barnes-hut-cuda cuda/barnes-hut.cu -lm -O2
 
 cuda_barneshutdebug:
-	${CUDA_COMPILER} -g -G -o ${BUILD_DIR}/barnes-hut-cuda cuda/definitive_barnes-hut/barnes-hut.cu -lm
+	${CUDA_COMPILER} -g -G -o ${BUILD_DIR}/barnes-hut-cuda cuda/barnes-hut.cu -lm
 
 play:
 	python3 utils/pygame-show.py $(FILE)
