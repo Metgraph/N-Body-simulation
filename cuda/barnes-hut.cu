@@ -56,7 +56,6 @@ const uint FULL_MASK=0xFFFFFFFF;
 
 // a lot of optimization like use shift instead of multiplication will be made by compiler
 
-// TODO put in a common file
 uint get_entities(char filename[], Entities *ents)
 {
     // Entity e_buff;
@@ -78,7 +77,7 @@ uint get_entities(char filename[], Entities *ents)
         return 0;
     }
 
-    // TODO Check for error in allocation
+    
     pos_ret = (double *)malloc(3 * sizeof(double));
     vel_ret = (double *)malloc(3 * sizeof(RVec3));
     mass_ret = (double *)malloc(1 * sizeof(double));
@@ -94,7 +93,7 @@ uint get_entities(char filename[], Entities *ents)
         size++;
         if (ret_size < size)
         {
-            // TODO Check for error in allocation
+            
             ret_size *= 2;
             // ret = (Entity *)realloc((void *)ret, ret_size * sizeof(Entity));
             pos_ret = (double *)realloc(pos_ret, ret_size * 3 * sizeof(double));
@@ -264,7 +263,6 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz){
 }
 
 // KERNEL 1
-//  TODO write a more optimized function
 __global__ void get_bounding_box(double *g_idata, int ents_sz, double *g_odata)
 {
     extern __shared__ double sdata[];
@@ -325,7 +323,7 @@ __global__ void center_of_mass(Octtree *tree)
     // new_mass is needed because we need old and new mass value at the same time
     double mass, new_mass;
     last_node = tree->firstfree - 1;
-    // TODO check if it's better to give the first not allocated node to the first free thread
+    
     for (int indx = last_node - id; indx >= tree->root; indx -= sz_threads)
     {
         // setting value on a new node, initialize variables
@@ -344,7 +342,6 @@ __global__ void center_of_mass(Octtree *tree)
             if (child_indx != -1)
             {
                 // move at the begin not null branches
-                // TODO maybe an if on null_counter can be more efficient
                 // even better save new children array and copy once
                 tree->children[indx * 8 + i - null_counter] = child_indx;
                 // if child is not calculated yet
@@ -358,7 +355,6 @@ __global__ void center_of_mass(Octtree *tree)
                     new_mass += tree->mass[child_indx];
                     // ents += 1;
                     ents += tree->ents[child_indx];
-                    // TODO optimized, just divide at the end
                     center[0] = (tree->center[child_indx * 3] * tree->mass[child_indx] / new_mass) + (center[0] * mass / new_mass);
                     center[1] = (tree->center[child_indx * 3 + 1] * tree->mass[child_indx] / new_mass) + (center[1] * mass / new_mass);
                     center[2] = (tree->center[child_indx * 3 + 2] * tree->mass[child_indx] / new_mass) + (center[2] * mass / new_mass);
@@ -375,7 +371,7 @@ __global__ void center_of_mass(Octtree *tree)
         {
             tree->children[indx * 8 + i] = -1;
         }
-        // TODO resolve divergence
+        
         do
         {
             int completed = 0;
@@ -388,7 +384,6 @@ __global__ void center_of_mass(Octtree *tree)
                     new_mass += tree->mass[child_indx];
                     // ents += 1;
                     ents += tree->ents[child_indx];
-                    // TODO optimized, just divide at the end
                     center[0] = (tree->center[child_indx * 3] * tree->mass[child_indx] / new_mass) + (center[0] * mass / new_mass);
                     center[1] = (tree->center[child_indx * 3 + 1] * tree->mass[child_indx] / new_mass) + (center[1] * mass / new_mass);
                     center[2] = (tree->center[child_indx * 3 + 2] * tree->mass[child_indx] / new_mass) + (center[2] * mass / new_mass);
@@ -493,7 +488,7 @@ __device__ int get_next_node(int curr_node, int parent, int children[], int last
 
 __global__ void acceleration_w_stack(Octtree *tree, Entities *ents,
                                      int ents_sz, int* sorted_nodes, double *acc_buff, size_t total_mem) {
-    // TODO check memory dimensions while adding values in the stack
+    
     extern __shared__ Stacknode stacks[];
     // change 32 with warp size
     int entId, laneId, myWarpId, stackSz, totalWarps, myId,
@@ -849,8 +844,7 @@ void print_time(struct timespec *s, struct timespec *e){
     printf("Elapsed wall time: %f s\n", time_spent);
 }
 
-// TODO check errors from malloc and kernels and fopen
-// TODO implement cache for calculated value
+
 int main(int argc, char *argv[])
 {
     // opt_thread is value to optimize
@@ -893,7 +887,7 @@ int main(int argc, char *argv[])
 
     cudaGetDeviceProperties(&cuda_prop, 0);
 
-    int nodes_sz = 0; // TODO get size of number of node
+    int nodes_sz = 0; 
     check_error(cudaFuncGetAttributes(&funcAttrib, add_ent), (char *)"get regs");
 
     cuda_err = cudaMallocHost(&h_lepos, sizeof(double) * n_ents * 3);
@@ -920,7 +914,6 @@ int main(int argc, char *argv[])
     cuda_err = cudaMalloc(&d_acc, sizeof(double) * 3 * n_ents);
     check_error(cuda_err);
 
-    //TODO can be optimized, read first time directly on position time
     cuda_err = cudaMalloc(&d_reduce1, sizeof(double) * (n_ents * 3));
     check_error(cuda_err);
     cuda_err = cudaMalloc(&d_reduce2, sizeof(double) * ((n_ents * 3 - 1) / 1024 + 1));
@@ -970,7 +963,6 @@ int main(int argc, char *argv[])
     //pos and mass will be used like a buffer for the prints
     free(h_ents_struct.vel);
     
-    // TODO recalculate thread and block size
     int max_threads = cuda_prop.maxThreadsPerBlock;
     printf("Initialization completed\n");
     FILE *fpt = fopen(argv[5], "w");
@@ -1064,7 +1056,6 @@ int main(int argc, char *argv[])
     int grid_sz=(n_ents-1)/max_threads+1;
     printf("STARTING LOOP\n");
     printf("number of steps: %lu\n", n_steps);
-    //TODO remove
     for(size_t t = 1; t <= n_steps; t++){
         #ifdef PRINT_LOOP
         printf("loop %d\n", t);
