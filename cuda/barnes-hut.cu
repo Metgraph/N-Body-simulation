@@ -5,6 +5,7 @@
 #include <stdlib.h>
 
 #define LOCKED -2
+#define PRINT_LOOP
 
 //compute-sanitizer --tool memcheck
 // https://docs.nvidia.com/compute-sanitizer/ComputeSanitizer/index.html
@@ -45,6 +46,7 @@ typedef struct {
     double border;
 } Stacknode;
 
+#define RESULTS
 
 // const double BIG_G = 6.67e-11;
 const double BIG_G = 1;
@@ -865,6 +867,7 @@ int main(int argc, char *argv[])
     struct timespec s, e;
     #endif
     struct timespec s_total, e_total;
+    struct cudaFuncAttributes funcAttrib;
     // *_e* memory for entity data
     // *_t* memory for tree data
     // h_le* (host) memory locked for entity data copies
@@ -887,14 +890,11 @@ int main(int argc, char *argv[])
     end = strtof(argv[3], NULL);
     dt = strtof(argv[4], NULL);
     n_steps = (end - start) / dt;
-    // n_ents = get_entities((char *)"/home/prop/Documents/multicore/cuda/tests/500_bodies.csv", &h_ents_struct);
-    // start = 0;
-    // dt = 1;
-    // end = dt * 20;
 
     cudaGetDeviceProperties(&cuda_prop, 0);
 
     int nodes_sz = 0; // TODO get size of number of node
+    check_error(cudaFuncGetAttributes(&funcAttrib, add_ent), (char *)"get regs");
 
     cuda_err = cudaMallocHost(&h_lepos, sizeof(double) * n_ents * 3);
     check_error(cuda_err);
@@ -974,7 +974,7 @@ int main(int argc, char *argv[])
     int max_threads = cuda_prop.maxThreadsPerBlock;
     printf("Initialization completed\n");
     FILE *fpt = fopen(argv[5], "w");
-    // FILE *fpt = fopen("/home/prop/Documents/multicore/N-Body-simulation/tests/output/cuda_barn.csv", "w");
+    
     clock_gettime(CLOCK_REALTIME, &s_total);
     double *d_reduce_in, *d_reduce_out;
     block.x = cuda_prop.warpSize;
@@ -1009,7 +1009,8 @@ int main(int argc, char *argv[])
     print_time(&s, &e);
     #endif
     cudaMemcpy(&d_tree->max, d_reduce_in, sizeof(double), cudaMemcpyDeviceToDevice);
-    get_opt_grid(&cuda_prop, n_ents, 56, &opt_block, &opt_thread);
+    get_opt_grid(&cuda_prop, n_ents, funcAttrib.numRegs, &opt_block, &opt_thread);
+    printf("opt_grid: %u %u\n", opt_block, opt_thread);
     // uses 56 registers
 
     #ifdef PRINT_KERNEL_TIME
@@ -1062,32 +1063,38 @@ int main(int argc, char *argv[])
 
     int grid_sz=(n_ents-1)/max_threads+1;
     printf("STARTING LOOP\n");
+    printf("number of steps: %lu\n", n_steps);
     //TODO remove
     for(size_t t = 1; t <= n_steps; t++){
+        #ifdef PRINT_LOOP
         printf("loop %d\n", t);
+        #endif
          #ifdef PRINT_KERNEL_TIME
         clock_gettime(CLOCK_REALTIME, &s);
         #endif
         update_velocities<<<grid_sz, max_threads>>>(d_acc, d_ents_struct,
                                         n_ents, dt);
-        cudaDeviceSynchronize();
+        cuda_err=cudaDeviceSynchronize();
         #ifdef PRINT_KERNEL_TIME
         clock_gettime(CLOCK_REALTIME, &e);
         print_time(&s, &e);
         #endif
+        check_error(cuda_err, (char *)"update vel loop");
 
         #ifdef PRINT_KERNEL_TIME
         clock_gettime(CLOCK_REALTIME, &s);
         #endif
         update_positions<<<grid_sz, max_threads>>>(d_ents_struct, n_ents,
                                         dt);
-        cudaDeviceSynchronize();
+        cuda_err=cudaDeviceSynchronize();
         #ifdef PRINT_KERNEL_TIME
         clock_gettime(CLOCK_REALTIME, &e);
         print_time(&s, &e);
         #endif
-
+        check_error(cuda_err, (char *)"update pos loop");
+#ifdef RESULTS
         print_csv(fpt, d_epos, d_emass, &h_ents_struct, n_ents);
+#endif
 
         block.x = cuda_prop.warpSize;
         block.y = 7;
@@ -1095,16 +1102,18 @@ int main(int argc, char *argv[])
         clock_gettime(CLOCK_REALTIME, &s);
         #endif
         set_tree<<<1, block>>>(d_tree);
-        cudaDeviceSynchronize();
+        cuda_err=cudaDeviceSynchronize();
         #ifdef PRINT_KERNEL_TIME
         clock_gettime(CLOCK_REALTIME, &e);
         print_time(&s, &e);
         #endif
+        check_error(cuda_err, (char *)"set tree loop");
 
         d_reduce_in = d_reduce1;
         d_reduce_out = d_reduce2;
         
-        cudaMemcpy(d_reduce_in, d_epos, sizeof(double)*n_ents*3, cudaMemcpyDeviceToDevice);
+        cuda_err=cudaMemcpy(d_reduce_in, d_epos, sizeof(double)*n_ents*3, cudaMemcpyDeviceToDevice);
+        check_error(cuda_err, (char *)"copy d_epos to d_reduce_in loop");
         #ifdef PRINT_KERNEL_TIME
         clock_gettime(CLOCK_REALTIME, &s);
         #endif
@@ -1121,7 +1130,8 @@ int main(int argc, char *argv[])
         print_time(&s, &e);
         #endif
 
-        cudaMemcpy(&d_tree->max, d_reduce_in, sizeof(double), cudaMemcpyDeviceToDevice);
+        cuda_err=cudaMemcpy(&d_tree->max, d_reduce_in, sizeof(double), cudaMemcpyDeviceToDevice);
+        check_error(cuda_err, (char *)"copy d_reduce_in to d_tree.max loop");
 
         get_opt_grid(&cuda_prop, n_ents, 56, &opt_block, &opt_thread);
         
@@ -1134,7 +1144,7 @@ int main(int argc, char *argv[])
         clock_gettime(CLOCK_REALTIME, &e);
         print_time(&s, &e);
         #endif
-        check_error(cuda_err);
+        check_error(cuda_err, (char *)"add ent loop");
 
         #ifdef PRINT_KERNEL_TIME
         clock_gettime(CLOCK_REALTIME, &s);
@@ -1145,7 +1155,7 @@ int main(int argc, char *argv[])
         clock_gettime(CLOCK_REALTIME, &e);
         print_time(&s, &e);
         #endif
-        check_error(cuda_err);
+        check_error(cuda_err, (char *)"center of mass loop");
 
         #ifdef PRINT_KERNEL_TIME
         clock_gettime(CLOCK_REALTIME, &s);
@@ -1156,7 +1166,7 @@ int main(int argc, char *argv[])
         clock_gettime(CLOCK_REALTIME, &e);
         print_time(&s, &e);
         #endif
-        check_error(cuda_err, (char *)"sort_ents call");
+        check_error(cuda_err, (char *)"sort ents loop");
         
         #ifdef PRINT_KERNEL_TIME
         clock_gettime(CLOCK_REALTIME, &s);
@@ -1167,18 +1177,19 @@ int main(int argc, char *argv[])
         clock_gettime(CLOCK_REALTIME, &e);
         print_time(&s, &e);
         #endif
-        check_error(cuda_err, (char *)"acceleration line");
+        check_error(cuda_err, (char *)"acceleration loop");
 
         #ifdef PRINT_KERNEL_TIME
         clock_gettime(CLOCK_REALTIME, &s);
         #endif
         update_velocities<<<grid_sz, max_threads>>>(d_acc, d_ents_struct,
                                         n_ents, dt);
-        cudaDeviceSynchronize();
+        cuda_err=cudaDeviceSynchronize();
         #ifdef PRINT_KERNEL_TIME
         clock_gettime(CLOCK_REALTIME, &e);
         print_time(&s, &e);
         #endif
+        check_error(cuda_err, (char *)"update vel 2 loop");
     }
     clock_gettime(CLOCK_REALTIME, &e_total);
     // print_csv(fpt, d_epos, d_emass, &h_ents_struct, n_ents);
