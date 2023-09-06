@@ -95,7 +95,9 @@ void cuda_check_error(cudaError_t error, const char *message) {
  */
 __host__
 void propagation(double *h_positions, double *h_velocities, uint ents_sz, int n_steps, double dt, const char *output) {
+#ifdef RESULTS
     FILE *fpt;
+#endif
     cudaError_t error;
     double *d_positions;
     double *d_velocities;
