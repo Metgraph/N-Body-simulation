@@ -211,6 +211,7 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz){
         double volume_center[3]={0,0,0};
         double pos_ent[3];
         allocated = 0;
+        //start from the root
         root = tree->root;
         node_indx = root;
         border_size=tree->max;
@@ -220,13 +221,19 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz){
         tree->ents[id] = 1;
 
         while(!allocated){
+            //get the child position to lock
             body_pos= get_indx_loc(pos_ent, volume_center, &border_size);
             child_indx = node_indx * 8 + body_pos;
             do{
                 child_val = tree->children[child_indx];
                 if(child_val!=LOCKED){
                     if(child_val == atomicCAS(&tree->children[child_indx], child_val, LOCKED)){
+                        //the child position has been locked
+
+                        //update the number of entities in the sub-tree
                         atomicAdd(&tree->ents[node_indx], 1);
+
+                        //if there is no child
                         if(child_val == -1){
 
                             tree->children[child_indx] = id;
@@ -234,7 +241,9 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz){
                             allocated=1;
                             __threadfence();
                         }else{
+                            //if there is another entity
                             if(child_val < root){
+                                //prepare variables for the other entity
                                 int other = child_val;
                                 double other_center[3];
                                 copy_arrs3(other_center, volume_center, 0);
@@ -243,6 +252,7 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz){
                                 double other_border=border_size;
                                 int other_pos = body_pos;
 
+                                //repeat until the two entities can be allocated in different positions
                                 while(body_pos == other_pos){
                                     int free = atomicAdd(&tree->firstfree, 1);
                                     init_node(tree, free);
@@ -252,10 +262,13 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz){
                                     body_pos=get_indx_loc(pos_ent, volume_center, &border_size);
                                     other_pos=get_indx_loc(other_pos_vol, other_center, &other_border);
                                     node_indx=free;
+                                    //lock new entity position
                                     tree->children[node_indx*8 + body_pos]=LOCKED;
                                     if(body_pos!=other_pos){
+                                        //lock new other entity position
                                         tree->children[node_indx*8 + other_pos]=LOCKED;
                                     }
+                                    //unlock old entity position (now occupied by a no-entity node)
                                     tree->children[child_indx]=node_indx;
                                     child_indx=node_indx * 8 + body_pos;
                                     __threadfence();
@@ -268,6 +281,7 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz){
                                 __threadfence();
                                 allocated = 1;
 
+                            //if there is a node not entity
                             }else{
                                 node_indx=child_val;
                                 tree->children[child_indx] = child_val;
@@ -300,7 +314,6 @@ __global__ void get_bounding_box(double *g_idata, int ents_sz, double *g_odata)
     uint i = (blockIdx.x * (blockDim.x * 2) + threadIdx.x);
     double v1, v2;
     // if thread are more than values give them a 0 value
-    // the first if has no divergence, becuase threads have same ents_sz value
     if (i < ents_sz)
     {
         v1 = fabs(g_idata[i])*2;
@@ -382,7 +395,6 @@ __global__ void center_of_mass(Octtree *tree)
                 else
                 {
                     new_mass += tree->mass[child_indx];
-                    // ents += 1;
                     ents += tree->ents[child_indx];
                     center[0] = (tree->center[child_indx * 3] * tree->mass[child_indx] / new_mass) + (center[0] * mass / new_mass);
                     center[1] = (tree->center[child_indx * 3 + 1] * tree->mass[child_indx] / new_mass) + (center[1] * mass / new_mass);
@@ -411,7 +423,7 @@ __global__ void center_of_mass(Octtree *tree)
                 if (tree->mass[child_indx] > 0)
                 {
                     new_mass += tree->mass[child_indx];
-                    // ents += 1;
+                    
                     ents += tree->ents[child_indx];
                     center[0] = (tree->center[child_indx * 3] * tree->mass[child_indx] / new_mass) + (center[0] * mass / new_mass);
                     center[1] = (tree->center[child_indx * 3 + 1] * tree->mass[child_indx] / new_mass) + (center[1] * mass / new_mass);
@@ -446,28 +458,31 @@ __global__ void center_of_mass(Octtree *tree)
 */
 __global__ void sort_ents(Octtree *tree, int *sorted)
 {
-    //all __syncthreads() have been added to increase performance
     int id = blockDim.x * blockIdx.x + threadIdx.x;
     int node_id;
+    //use only n_ents thread
     if(id<tree->root){
         node_id=tree->root;
         int count_ents=0;
+
+        //repeat until thread reach a leaf 
         while(tree->ents[node_id]>1){
             int i=0;
             int child_ents=0;
             int child;
+            //this while loop assign the branch where the thread will enter
             do
             {
                 count_ents+=child_ents;
                 child=tree->children[node_id*8+i];
                 i++;
                 child_ents = tree->ents[child];
-            // } while (count_ents+child_ents<=id);
+            
             } while (id>=count_ents+child_ents);
             __syncwarp();
             node_id=child;
         }
-        // __syncthreads();
+        
         sorted[id]=node_id;
     }
 }
@@ -517,8 +532,8 @@ __device__ double get_distance(double3 *r1, double3 *r2)
  * @param *ents             Array with bodies informations
  * @param ents_sz           Total number of bodies
  * @param *sorted_nodes     Array with the leaves as in-order visit
- * @param *acc_buff
- * @pram  total_mem
+ * @param *acc_buff         Array where store the accelerations
+ * @pram  total_mem         Size of shared memory allocated per block, the kernel will divide by itself this memory
  */
 __global__ void acceleration_w_stack(Octtree *tree, Entities *ents, int ents_sz, int* sorted_nodes, double *acc_buff, size_t total_mem) {
 
@@ -534,9 +549,11 @@ __global__ void acceleration_w_stack(Octtree *tree, Entities *ents, int ents_sz,
     laneId = threadIdx.x % 32;
     myWarpId = threadIdx.x / 32;
     totalWarps = (blockDim.x - 1) / 32 + 1;
+    //divide the shared memory between warps
     stackSz = total_mem / sizeof(Stacknode)/ totalWarps;
     lastIndx = 0;
-    // my_pos_mass = tree->node_pos[myId];
+    //is important keep all thread in the kernel
+    //if there is no entity to assign, a fake entity will be assigned to the thread
     if(myId<ents_sz){
         entId = sorted_nodes[myId];
         my_mass = ents->mass[entId];
@@ -583,6 +600,7 @@ __global__ void acceleration_w_stack(Octtree *tree, Entities *ents, int ents_sz,
                 // decrement lastIndx because we remove the node from stack
                 lastIndx--;
                 int indx = tree->children[nodeId * 8 + laneId];
+                //this code allow to use 8 thread instead of 1 to insert the nodes in the stack
                 int mask = __ballot_sync(0x000000FF, indx != -1);
 
                 int pushPos = __popc(~(FULL_MASK << (laneId+1)) & mask);
@@ -601,6 +619,7 @@ __global__ void acceleration_w_stack(Octtree *tree, Entities *ents, int ents_sz,
         }
 
     }
+    //put data inside the acceleration buffer
     if(myId<ents_sz){
         acc_buff[entId*3]=myAcc.x;
         acc_buff[entId*3+1]=myAcc.y;
