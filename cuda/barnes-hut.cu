@@ -3,6 +3,7 @@
 #include <cuda_runtime.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 
 #define LOCKED -2
 #define PRINT_LOOP
