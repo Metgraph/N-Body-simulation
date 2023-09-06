@@ -1,0 +1,54 @@
+exh_serial 3 test 1 iterazione 100k corpi: 292.344016
+
+exh_mp:
+20 test 1000 iterazioni 100 corpi: 0.62389
+20 test 1000 iterazioni 1k corpi: 2.039144
+20 test 100 iterazioni 10k corpi: 19.856391
+10 test 10 iterazioni 100k corpi: 215.103276
+
+exh_cuda:
+20 test 1000 iterazioni 100 corpi: 0.459043
+20 test 1000 iterazioni 1k corpi: 31.131904
+20 test 100 iterazioni 10k corpi: 31.418062
+10 test 10 iterazioni 100k corpi: 136.669429
+3 test 1 iterazione 1m corpi: 
+
+bh_serial
+20 test 1000 iterazioni 100 corpi: 0.153013
+20 test 1000 iterazioni 1k corpi: 5.928158
+20 test 100 iterazioni 10k corpi: 11.590033
+10 test 10 iterazioni 100k corpi: 21.968285
+10 test 1 iterazione 1m corpi: 77.625262
+
+bh_mp:
+50 test 1000 iterazioni 100 corpi: 0.079937
+50 test 1000 iterazioni 1k corpi: 1.019408
+20 test 100 iterazioni 10k corpi: 1.702844
+20 test 10 iterazioni 100k corpi: 3.126746
+10 test 1 iterazione 1m corpi: 10.605807
+10 test 10 iterazione 1m corpi: 62.454408
+
+bh_cuda:
+20 test 1000 iterazioni 100 corpi: 20.263829
+20 test 100 iterazioni 1k corpi: 25.582459
+20 test 10 iterazioni 10k corpi: 6.011314
+20 test 10 iterazioni 100k corpi: 9.382231
+10 test 1 iterazione 1m corpi: 9.490644
+10 test 10 iterazione 1m corpi: 58.764178
+
+exh_mp 10k corpi 10 test 50 iterazioni:
+1 thread: 73.328837
+2 thread: 37.004736
+4 thread: 19.518192
+6 thread: 13.038844
+12 thread: 9.964325
+24 thread: 10.460735
+
+bh_mp 10k corpi 20 test 300 iterazioni:
+1 thread: 35.724203
+2 thread: 18.308559
+4 thread: 9.808500
+6 thread: 6.693715
+12 thread: 4.964194
+24 thread: 13.447142
+
