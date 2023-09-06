@@ -115,7 +115,7 @@ def play(
 
         # Limitazione del framerate
         clock.tick(30*10)
-        pygame.image.save(screen, f"images/2022-{current_frame}.png")
+        # pygame.image.save(screen, f"images/2022-{current_frame}.png")
 
         # Aggiornamento del frame corrente
         current_frame += 1
