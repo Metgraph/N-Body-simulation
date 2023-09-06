@@ -9,7 +9,7 @@ output_path = "output.gif"
 # Salva la GIF
 print(f"Writing the gif to: {output_path}")
 
-images[0].save(output_path, save_all=True, append_images=images[1:], duration=33, loop=0)
+images[0].save(output_path, save_all=True, append_images=images[1:], duration=20, loop=0)
 
 print("Completed!")
 

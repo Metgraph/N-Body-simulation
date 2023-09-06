@@ -32,6 +32,10 @@ barneshut_debug:
 barneshut_openmp:
 	${COMPILER} -Wall -o ${BUILD_DIR}/barnes-hut-omp openmp/barnes-hut.c -lm -fopenmp
 
+barneshut_openmp_no_opt:
+	${COMPILER} -Wall -O0 -o ${BUILD_DIR}/barnes-hut-omp-nopt openmp/barnes-hut.c -lm -fopenmp
+
+
 barneshut_openmp_debug:
 	${COMPILER} -DRESULTS -Wall -o ${BUILD_DIR}/barnes-hut-omp-debug openmp/barnes-hut.c -lm -fopenmp
 

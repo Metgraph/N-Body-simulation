@@ -128,7 +128,7 @@ void get_entities(char filename[], Entity **ents, RVec3 **vel, uint *n_ents) {
         exit(2);
     }
 
-    *vel = malloc(*n_ents * sizeof(Entity));
+    *vel = malloc(*n_ents * sizeof(RVec3));
     if (*vel == NULL) {
         fprintf(stderr, "Error during memory allocation\n");
         exit(3);
@@ -136,9 +136,10 @@ void get_entities(char filename[], Entity **ents, RVec3 **vel, uint *n_ents) {
 
     ret_ptr = *ents;
     vel_p = *vel;
-    while ((fscanf(file, "%lf, %lf, %lf, %lf, %lf, %lf, %lf\n", &e_buff.pos.x,
-                   &e_buff.pos.y, &e_buff.pos.z, &vel_p->x, &vel_p->y,
-                   &vel_p->z, &e_buff.mass)) == 7) {
+    while ((fscanf(file, "%lf, %lf, %lf, %lf, %lf, %lf, %lf\n",
+                    &e_buff.pos.x, &e_buff.pos.y, &e_buff.pos.z,
+                    &vel_p->x, &vel_p->y, &vel_p->z,
+                    &e_buff.mass)) == 7) {
         *ret_ptr++ = e_buff;
         vel_p++;
     }
