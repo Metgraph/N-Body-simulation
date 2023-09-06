@@ -113,7 +113,8 @@ uint get_entities(char filename[], Entity **ents) {
  * @return      Distance
  */
 double get_distance(RVec3 *r1, RVec3 *r2) {
-    return sqrt(pow(r1->x - r2->x, 2) + pow(r1->y - r2->y, 2) +
+    return sqrt(pow(r1->x - r2->x, 2) +
+                pow(r1->y - r2->y, 2) +
                 pow(r1->z - r2->z, 2));
 }
 
@@ -172,7 +173,8 @@ int init_node(Octtree *tree) {
 }
 
 /*
- * Add a entity in the tree creating all the necessary branches
+ * Add a entity in the tree creating all the necessary branches.
+ * The leaves of the tree are bijectively associated to an entity.
  *
  * @param *tree     Tree info struct
  * @param *ent      The body to insert
@@ -373,8 +375,7 @@ void center_of_mass(Octtree *tree) {
  * @params *max_val     Where to save the maximum
  * @params *loc_max     Local maximum for each thread
  */
-void get_bounding_box(Entity ents[], int ents_sz, double *max_val,
-                      pad_double *loc_max) {
+void get_bounding_box(Entity ents[], int ents_sz, double *max_val, pad_double *loc_max) {
     int id = omp_get_thread_num();
     loc_max[id].val = 0.0;
 

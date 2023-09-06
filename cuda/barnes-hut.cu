@@ -52,13 +52,16 @@ typedef struct {
 const double BIG_G = 1;
 const double THETA = 0.5; // 1;
 const uint FULL_MASK=0xFFFFFFFF;
-// TODO check from version
 
-// a lot of optimization like use shift instead of multiplication will be made by compiler
-
+/**
+ * Read file and generate an array of Entity
+ *
+ * @param   filename    Input filename
+ * @param   **ents      Array for bodies information storage
+ * @return  Total number of bodies
+ */
 uint get_entities(char filename[], Entities *ents)
 {
-    // Entity e_buff;
     double pos_buff[3];
     double vel_buff[3];
     double mass_buff;
@@ -70,14 +73,13 @@ uint get_entities(char filename[], Entities *ents)
 
     FILE *f = fopen(filename, "r");
 
-    // Check if file has been open correctly, if not return NULL
     if (!f)
     {
         fprintf(stderr, "Error opening file '%s'\n", filename);
         return 0;
     }
 
-    
+
     pos_ret = (double *)malloc(3 * sizeof(double));
     vel_ret = (double *)malloc(3 * sizeof(RVec3));
     mass_ret = (double *)malloc(1 * sizeof(double));
@@ -93,7 +95,7 @@ uint get_entities(char filename[], Entities *ents)
         size++;
         if (ret_size < size)
         {
-            
+
             ret_size *= 2;
             // ret = (Entity *)realloc((void *)ret, ret_size * sizeof(Entity));
             pos_ret = (double *)realloc(pos_ret, ret_size * 3 * sizeof(double));
@@ -128,9 +130,13 @@ uint get_entities(char filename[], Entities *ents)
     return size;
 }
 
-__device__ double border_tree(Octtree *tree) { return tree->max * 2; }
-
-// copy array of 3 elements, usually used for position array
+/*
+ * Copy array of 3 elements, usually used for position array
+ *
+ * @param *dest     Destination array
+ * @param *src      Source
+ * @param *indx     Index of element
+ */
 __device__ void copy_arrs3(double *dest, double *src, uint indx)
 {
     dest[indx] = src[indx];
@@ -138,7 +144,13 @@ __device__ void copy_arrs3(double *dest, double *src, uint indx)
     dest[indx + 2] = src[indx + 2];
 }
 
-__device__ void init_node(Octtree *tree, int indx, int depth)
+/*
+ * Initialize new node
+ *
+ * @param *node     The node to inizialize
+ * @param *indx     Index of node
+ */
+__device__ void init_node(Octtree *tree, int indx)
 {
     tree->center[indx * 3] = 0;
     tree->center[indx * 3 + 1] = 0;
@@ -146,14 +158,21 @@ __device__ void init_node(Octtree *tree, int indx, int depth)
     tree->mass[indx] = 0;
     tree->ents[indx] = 0;
     tree->parent[indx] = -1;
-    // tree->depth[indx] = depth;
     for (uint i = 0; i < 8; i++)
     {
         tree->children[indx * 8 + i] = -1;
     }
 }
 
-// pos and center must point to the first axis of position
+/*
+ * Calculate in wich branch (child index) where the body will be placed into node.
+ * Pos and center must point to the first axis of position.
+ *
+ * @param *pos          Body positions (x, y, z)
+ * @param *center       Center of the node
+ * @param *border_size  Total lenght of node's border
+ * @return              Body location
+ */
 __device__ int get_indx_loc(double *pos, double *center, double *border_size)
 {
     int indx;
@@ -175,14 +194,17 @@ __device__ int get_indx_loc(double *pos, double *center, double *border_size)
     return indx;
 }
 
-// KERNEL 2
-//  add a entity in the tree
-//  it's create all the needed branch
-//  the leaf of the tree are biunivocaly (e' inglese?) associated to an entity
+/*
+ * Add a entity in the tree creating all the necessary branches
+ * The leaves of the tree are bijectively associated to an entity.
+ *
+ * @param *tree     Tree info struct
+ * @param *ent      The body to insert
+ * @param id        Body's index into nodes array
+ */
 __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz){
     int id = threadIdx.x + blockIdx.x * blockDim.x;
     if(id< ents_sz){
-        // printf("body %d will be added in the tree\n", id);
         int allocated, node_indx, body_pos, child_val, child_indx, root;
         double border_size;
         double volume_center[3]={0,0,0};
@@ -205,7 +227,7 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz){
                     if(child_val == atomicCAS(&tree->children[child_indx], child_val, LOCKED)){
                         atomicAdd(&tree->ents[node_indx], 1);
                         if(child_val == -1){
-                            // copy_arrs3(&tree->center[id*3], pos_ent, 0);
+
                             tree->children[child_indx] = id;
                             tree->parent[id] = node_indx;
                             allocated=1;
@@ -222,10 +244,10 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz){
 
                                 while(body_pos == other_pos){
                                     int free = atomicAdd(&tree->firstfree, 1);
-                                    init_node(tree, free, 0);
+                                    init_node(tree, free);
                                     tree->parent[free]= node_indx;
                                     tree->ents[free]=2;
-                                    
+
                                     body_pos=get_indx_loc(pos_ent, volume_center, &border_size);
                                     other_pos=get_indx_loc(other_pos_vol, other_center, &other_border);
                                     node_indx=free;
@@ -257,12 +279,16 @@ __global__ void add_ent(Octtree *tree, Entities *ent, uint ents_sz){
                 }
             }while(child_val==LOCKED);
         }
-        // printf("body %d added in the tree\n", id);
-
     }
 }
 
-// KERNEL 1
+/*
+ * Find the maximum distance beetween the bodies and the center.
+ *
+ * @params *g_idata       Array with bodies data
+ * @params ents_sz        Total number of bodies
+ * @params *g_odata       Output array for maximum values found
+ */
 __global__ void get_bounding_box(double *g_idata, int ents_sz, double *g_odata)
 {
     extern __shared__ double sdata[];
@@ -304,13 +330,15 @@ __global__ void get_bounding_box(double *g_idata, int ents_sz, double *g_odata)
     // write result for this block to global mem
     if (tid == 0)
     {
-
         g_odata[blockIdx.x] = sdata[0];
     }
 }
 
-// KERNEL 3
-//  if mass==0 node is not ready
+/*
+ * Calculate the center of mass for each node.
+ *
+ * @param *tree     Tree info struct
+ */
 __global__ void center_of_mass(Octtree *tree)
 {
     int sz_threads = gridDim.x * blockDim.x;
@@ -323,7 +351,7 @@ __global__ void center_of_mass(Octtree *tree)
     // new_mass is needed because we need old and new mass value at the same time
     double mass, new_mass;
     last_node = tree->firstfree - 1;
-    
+
     for (int indx = last_node - id; indx >= tree->root; indx -= sz_threads)
     {
         // setting value on a new node, initialize variables
@@ -371,7 +399,7 @@ __global__ void center_of_mass(Octtree *tree)
         {
             tree->children[indx * 8 + i] = -1;
         }
-        
+
         do
         {
             int completed = 0;
@@ -409,8 +437,12 @@ __global__ void center_of_mass(Octtree *tree)
     }
 }
 
-// KERNEL 4
-//  here tree->parent will be used to store the "s", the position where to write values (tree->parent is not needed anymore)
+/*
+   Sort the leaves of the tree structure in the same order as in-order traversal.
+
+   @param *tree     Tree structure
+   @param *sorted   Output array
+*/
 __global__ void sort_ents(Octtree *tree, int *sorted)
 {
     //all __syncthreads() have been added to increase performance
@@ -439,9 +471,16 @@ __global__ void sort_ents(Octtree *tree, int *sorted)
     }
 }
 
-// il paper mette il calcolo delle accelerazioni nel kernel 5 e l'aggiornamento e velocita' nel kernel 6
-__device__ void calculate_acceleration(double3 *pos_ent, double mass_ent, double3 *pos_node, double mass_node,
-                                       double3 *acc)
+/*
+ * Calculate acceleration beetween two bodies
+ *
+ * @param *pos_ent      Main body position
+ * @param *mass_ent     Mass of the main body
+ * @param *pos_node     The node with wich perform calculation
+ * @param *mass_node    The mass of the other node
+ * @param *acc          New acceleration for ent
+ */
+__device__ void calculate_acceleration(double3 *pos_ent, double mass_ent, double3 *pos_node, double mass_node, double3 *acc)
 {
     double3 r_vector;
     r_vector.x = pos_node->x - pos_ent->x;
@@ -457,38 +496,31 @@ __device__ void calculate_acceleration(double3 *pos_ent, double mass_ent, double
     acc->z += BIG_G * r_vector.z * inv_r3 * mass_node;
 }
 
+/*
+ * Calculate Euclidean distance beetween two bodies
+ *
+ * @param r1    Coordinates of first body
+ * @param r2    Coordinates of second body
+ * @return      Distance
+ */
 __device__ double get_distance(double3 *r1, double3 *r2)
 {
     return sqrt((r1->x - r2->x) * (r1->x - r2->x) + (r1->y - r2->y) * (r1->y - r2->y) + (r1->z - r2->z) * (r1->z- r2->z));
 }
 
-__device__ int get_next_node(int curr_node, int parent, int children[], int last_node)
-{
-    if (parent == last_node)
-    {
-        return children[0];
-    }
-    for (int i = 0; i < 7; i++)
-    {
-        if (children[i] == last_node)
-        {
-            if (children[i + 1] > -1)
-            {
-                return children[i + 1];
-            }
-            else
-            {
-                return curr_node;
-            }
-            break;
-        }
-    }
-    return curr_node;
-}
 
-__global__ void acceleration_w_stack(Octtree *tree, Entities *ents,
-                                     int ents_sz, int* sorted_nodes, double *acc_buff, size_t total_mem) {
-    
+/*
+ * Calculate acceleration beetween two bodies
+ *
+ * @param *tree             Tree struct
+ * @param *ents             Array with bodies informations
+ * @param ents_sz           Total number of bodies
+ * @param *sorted_nodes     Array with the leaves as in-order visit
+ * @param *acc_buff
+ * @pram  total_mem
+ */
+__global__ void acceleration_w_stack(Octtree *tree, Entities *ents, int ents_sz, int* sorted_nodes, double *acc_buff, size_t total_mem) {
+
     extern __shared__ Stacknode stacks[];
     // change 32 with warp size
     int entId, laneId, myWarpId, stackSz, totalWarps, myId,
@@ -551,7 +583,7 @@ __global__ void acceleration_w_stack(Octtree *tree, Entities *ents,
                 lastIndx--;
                 int indx = tree->children[nodeId * 8 + laneId];
                 int mask = __ballot_sync(0x000000FF, indx != -1);
-                
+
                 int pushPos = __popc(~(FULL_MASK << (laneId+1)) & mask);
                 if (indx != -1) {
                     double3 center={tree->center[indx*3],tree->center[indx*3+1],tree->center[indx*3+2]};
@@ -566,24 +598,13 @@ __global__ void acceleration_w_stack(Octtree *tree, Entities *ents,
             __syncwarp();
             lastIndx = __shfl_sync(FULL_MASK, lastIndx, 7);
         }
-        
+
     }
     if(myId<ents_sz){
-        // printf("acc %d. x: %lf, y: %lf, z:%lf\n", myId, myAcc.x, myAcc.y, myAcc.z);
         acc_buff[entId*3]=myAcc.x;
         acc_buff[entId*3+1]=myAcc.y;
         acc_buff[entId*3+2]=myAcc.z;
 
-    }
-}
-
-void print_values(double *pos, double *vel, int ents_sz, FILE *fpt)
-{
-    for (int entity_idx = 0; entity_idx < ents_sz; entity_idx++)
-    {
-        fprintf(fpt, "%u,%lf,%lf,%lf,%lf,%lf,%lf \n", entity_idx, pos[entity_idx * 3],
-                pos[entity_idx * 3 + 1], pos[entity_idx * 3 + 2], vel[entity_idx * 3], vel[entity_idx * 3 + 1],
-                vel[entity_idx * 3 + 2]);
     }
 }
 
@@ -610,6 +631,12 @@ void get_opt_grid(cudaDeviceProp *prop, uint tot_threads, uint regs_sz, uint *bl
     *threads_sz = temp_thread;
 }
 
+/*
+ *  Check error after cuda functions.
+ *
+ *  @param error        Cuda error message
+ *  @param *str         Message to print if there's an error
+ */
 void check_error(cudaError_t err, char *str=NULL)
 {
     if (err != cudaSuccess)
@@ -624,16 +651,12 @@ void check_error(cudaError_t err, char *str=NULL)
     }
 }
 
-__global__ void print_node(Octtree *tree, int i){
-    printf("id: %d, ", i);
-        printf("pos: [x: %lf, y: %lf, z:%lf], ", tree->center[i*3], tree->center[i*3+1], tree->center[i*3+2]);
-        printf("children: [");
-        for(int j=i*8; j<i*8+8; j++){
-            printf("%d, ", tree->children[j]);
-        }
-        printf("], parent: %d\n", tree->parent[i]);
-}
 
+/*
+   Initialize tree structure
+
+   @param *tree     Tree structure
+*/
 __global__ void set_tree(Octtree *tree)
 {
     int root = tree->root;
@@ -687,69 +710,16 @@ __global__ void set_tree(Octtree *tree)
     }
 }
 
-__global__ void ci_sono_tutti_i_numeri(int *sorted_nodes, int ents_sz)
-{
-    int id = threadIdx.x + blockDim.x * blockIdx.x;
-    __shared__ int cache[1024];
 
-    int cache_id = id % 1024;
-
-    int miss = id<ents_sz ? 1 : 0;
-    for (int i = 0; i < ents_sz; i += blockDim.x)
-    {
-        if (i + cache_id < ents_sz)
-        {
-            cache[cache_id] = sorted_nodes[i + cache_id];
-        }
-        __syncthreads();
-
-        int iteration_end = ents_sz > i + blockDim.x ? blockDim.x : ents_sz - i;
-        for (int j = 0; j < iteration_end; j++)
-        {
-            miss = miss && id != cache[j];
-        }
-        if (__syncthreads_and(!miss))
-        {
-            return;
-        }
-    }
-
-    if (miss)
-    {
-        printf("Missing: %d\n", id); // qua dovrebbe arrivare solo se completa il giro
-    }
-}
-
-__global__ void find_dups(int *sorted_nodes, int ents_sz)
-{
-    int id = threadIdx.x + blockDim.x * blockIdx.x;
-    if (ents_sz > id)
-    {
-        int my_val=sorted_nodes[id];
-        __shared__ int cache[1024];
-        int cache_id = id % 1024;
-        for (int i = 0; i < ents_sz; i+=blockDim.x)
-        {
-            if (i + cache_id < ents_sz)
-            {
-                cache[cache_id] = sorted_nodes[i + cache_id];
-            }
-            __syncthreads();
-            int iteration_end = ents_sz > i + blockDim.x ? blockDim.x : ents_sz - i;
-            for (int j = 0; j < iteration_end; j++)
-            {
-                if (my_val == cache[j] && id != i+j)
-                {
-                    printf("Duplicate of %d at pos %d found at %d\n", my_val, id, i+j);
-                }
-            }
-            __syncthreads();
-        }
-    }
-}
-
-__global__ void update_velocities(double *acc, Entities *ents, uint ents_sz,
-                                  double dt) {
+/*
+ * Update bodies velocities
+ *
+ * @param *acc      Accelerations array
+ * @param *ents     Array with bodies informations
+ * @param ents_sz   Total number of bodies
+ * @param dt        Time interval beetween one step and the next
+ */
+__global__ void update_velocities(double *acc, Entities *ents, uint ents_sz, double dt) {
     int myId;
 
     myId = blockIdx.x * blockDim.x + threadIdx.x;
@@ -761,8 +731,14 @@ __global__ void update_velocities(double *acc, Entities *ents, uint ents_sz,
     }
 }
 
-__global__ void update_positions(Entities *ents, uint ents_sz,
-                                 double dt) {
+/*
+ * Update bodies positions
+ *
+ * @param *ents             Array with bodies informations
+ * @param ents_sz           Total number of bodies
+ * @param dt                Time interval beetween one step and the next
+ */
+__global__ void update_positions(Entities *ents, uint ents_sz, double dt) {
     double3 entPos;
     double3 entVelocities;
     int myId;
@@ -783,37 +759,9 @@ __global__ void update_positions(Entities *ents, uint ents_sz,
     }
 }
 
-void print_tree_rec(Octtree *tree, int id, char *space, uint depth) {
-    // Octnode *node = &tree->nodes[id];
-    // how much divide
-    uint temp = 1 << depth;
-    double border = (tree->max) / (double)temp;
-    printf("%sid: %d, (x:%lf, y:%lf, z:%lf), border: %lf, ents: %d, mass: %lf\n", space, id,
-           tree->center[id*3], tree->center[id*3+1], tree->center[id*3+2], border, tree->ents[id], tree->mass[id]);
-    if (tree->ents[id] > 1) {
-
-        int i;
-        for (i = depth * 4; i < depth * 4 + 4; i++) {
-            space[i] = ' ';
-        }
-        space[i] = '\0';
-        for (int i = 0; i < 8; i++) {
-            if (tree->children[id*8+i] > -1) {
-                print_tree_rec(tree, tree->children[id*8+i], space, depth + 1);
-            }
-        }
-        space[depth * 4] = '\0';
-    }
-}
-
-void print_tree(Octtree *tree) {
-    uint sz_space = 4 * 40;
-    char *space = (char*) malloc(sz_space * sizeof(char));
-    space[0] = '\0';
-    print_tree_rec(tree, tree->root, space, 0);
-    free(space);
-}
-
+/*
+   Print simulation results
+ */
 void print_csv(FILE *f, double *d_epos, double *d_emass, Entities *buff, int ents_sz){
     cudaError_t cuda_err;
     cuda_err=cudaMemcpy(buff->pos, d_epos, sizeof(double)*3*ents_sz, cudaMemcpyDeviceToHost);
@@ -832,8 +780,6 @@ void print_csv(FILE *f, double *d_epos, double *d_emass, Entities *buff, int ent
 
         fprintf(f, "%lu,%lf,%lf,%lf,%lf\n", i, pos.x, pos.y, pos.z, mass);
     }
-    
-
 }
 
 void print_time(struct timespec *s, struct timespec *e){
@@ -857,9 +803,11 @@ int main(int argc, char *argv[])
     dim3 block;
     int *d_tchildren, *d_tparent, *d_sorted_nodes;
     size_t free_mem, total_mem, n_steps;
+
     #ifdef PRINT_KERNEL_TIME
     struct timespec s, e;
     #endif
+
     struct timespec s_total, e_total;
     struct cudaFuncAttributes funcAttrib;
     // *_e* memory for entity data
@@ -869,11 +817,7 @@ int main(int argc, char *argv[])
     Entities h_ents_struct, *d_ents_struct, h_ents_cpy;
     Octtree h_tree_cpy, *d_tree;
     float start, end, dt;
-    // if (argc < 6 || argc > 7)
-    // {
-    //     fprintf(stderr, "Usage: %s input_filename start_time end_time delta_time output_filename [cache_sz_MB]\n", argv[0]);
-    //     return 1;
-    // }
+
     if(argc != 6){
         fprintf(stderr, "Usage: %s input_filename start_time end_time delta_time output_filename\n", argv[0]);
         return -1;
@@ -887,7 +831,7 @@ int main(int argc, char *argv[])
 
     cudaGetDeviceProperties(&cuda_prop, 0);
 
-    int nodes_sz = 0; 
+    int nodes_sz = 0;
     check_error(cudaFuncGetAttributes(&funcAttrib, add_ent), (char *)"get regs");
 
     cuda_err = cudaMallocHost(&h_lepos, sizeof(double) * n_ents * 3);
@@ -921,7 +865,6 @@ int main(int argc, char *argv[])
 
     cuda_err = cudaMemGetInfo(&free_mem, &total_mem);
     check_error(cuda_err);
-    // nodes_sz = free_mem * 3 / 4 / node_mem;
     // add int to allocate an array for reordered
     nodes_sz = free_mem * 3 / 4 / (node_mem + sizeof(int));
     printf("FREE MEM: %lu\nLEN NODES: %d\n", free_mem, nodes_sz);
@@ -962,32 +905,37 @@ int main(int argc, char *argv[])
 
     //pos and mass will be used like a buffer for the prints
     free(h_ents_struct.vel);
-    
+
     int max_threads = cuda_prop.maxThreadsPerBlock;
     printf("Initialization completed\n");
     FILE *fpt = fopen(argv[5], "w");
-    
+
     clock_gettime(CLOCK_REALTIME, &s_total);
     double *d_reduce_in, *d_reduce_out;
     block.x = cuda_prop.warpSize;
     block.y = 7;
+
     #ifdef PRINT_KERNEL_TIME
     clock_gettime(CLOCK_REALTIME, &s);
     #endif
+
     set_tree<<<1, block>>>(d_tree);
     cuda_err = cudaDeviceSynchronize();
+
     #ifdef PRINT_KERNEL_TIME
     clock_gettime(CLOCK_REALTIME, &e);
     print_time(&s, &e);
     #endif
-    
+
     check_error(cuda_err);
     d_reduce_in = d_reduce1;
     d_reduce_out = d_reduce2;
     cudaMemcpy(d_reduce_in, d_epos, sizeof(double)*n_ents*3, cudaMemcpyDeviceToDevice);
+
     #ifdef PRINT_KERNEL_TIME
     clock_gettime(CLOCK_REALTIME, &s);
     #endif
+
     for(int i=n_ents*3; i>1;i=((i-1)/(max_threads*2)+1)){
         get_bounding_box<<<(i-1)/(max_threads*2)+1, max_threads, max_threads * sizeof(double)>>>(d_reduce_in, i, d_reduce_out);
         cuda_err = cudaDeviceSynchronize();
@@ -996,54 +944,63 @@ int main(int argc, char *argv[])
         d_reduce_out=d_reduce_in;
         d_reduce_in=temp;
     }
+
     #ifdef PRINT_KERNEL_TIME
     clock_gettime(CLOCK_REALTIME, &e);
     print_time(&s, &e);
     #endif
+
     cudaMemcpy(&d_tree->max, d_reduce_in, sizeof(double), cudaMemcpyDeviceToDevice);
     get_opt_grid(&cuda_prop, n_ents, funcAttrib.numRegs, &opt_block, &opt_thread);
     printf("opt_grid: %u %u\n", opt_block, opt_thread);
-    // uses 56 registers
 
     #ifdef PRINT_KERNEL_TIME
     clock_gettime(CLOCK_REALTIME, &s);
     #endif
+
     add_ent<<<opt_block, opt_thread>>>(d_tree, d_ents_struct, n_ents);
     cuda_err = cudaDeviceSynchronize();
+
     #ifdef PRINT_KERNEL_TIME
     clock_gettime(CLOCK_REALTIME, &e);
     print_time(&s, &e);
     #endif
+
     check_error(cuda_err);
 
     #ifdef PRINT_KERNEL_TIME
     clock_gettime(CLOCK_REALTIME, &s);
     #endif
+
     center_of_mass<<<opt_block, opt_thread>>>(d_tree);
     cuda_err = cudaDeviceSynchronize();
+
     #ifdef PRINT_KERNEL_TIME
     clock_gettime(CLOCK_REALTIME, &e);
     print_time(&s, &e);
     #endif
+
     check_error(cuda_err);
 
     #ifdef PRINT_KERNEL_TIME
     clock_gettime(CLOCK_REALTIME, &s);
     #endif
+
     sort_ents<<<(n_ents-1)/max_threads+1, max_threads>>>(d_tree, d_sorted_nodes);
     cuda_err = cudaDeviceSynchronize();
+
     #ifdef PRINT_KERNEL_TIME
     clock_gettime(CLOCK_REALTIME, &e);
     print_time(&s, &e);
     #endif
-    check_error(cuda_err, (char *)"sort_ents call");
 
+    check_error(cuda_err, (char *)"sort_ents call");
 
     cudaMemset(d_acc, 0, sizeof(double)*3*n_ents);
     #ifdef PRINT_KERNEL_TIME
     clock_gettime(CLOCK_REALTIME, &s);
     #endif
-    
+
     acceleration_w_stack<<<(n_ents-1)/(cuda_prop.warpSize*2)+1,cuda_prop.warpSize*2, cuda_prop.sharedMemPerBlock>>>(d_tree, d_ents_struct, n_ents, d_sorted_nodes, d_acc, cuda_prop.sharedMemPerBlock);
     cuda_err = cudaDeviceSynchronize();
     #ifdef PRINT_KERNEL_TIME
@@ -1102,7 +1059,7 @@ int main(int argc, char *argv[])
 
         d_reduce_in = d_reduce1;
         d_reduce_out = d_reduce2;
-        
+
         cuda_err=cudaMemcpy(d_reduce_in, d_epos, sizeof(double)*n_ents*3, cudaMemcpyDeviceToDevice);
         check_error(cuda_err, (char *)"copy d_epos to d_reduce_in loop");
         #ifdef PRINT_KERNEL_TIME
@@ -1125,7 +1082,7 @@ int main(int argc, char *argv[])
         check_error(cuda_err, (char *)"copy d_reduce_in to d_tree.max loop");
 
         get_opt_grid(&cuda_prop, n_ents, 56, &opt_block, &opt_thread);
-        
+
         #ifdef PRINT_KERNEL_TIME
         clock_gettime(CLOCK_REALTIME, &s);
         #endif
@@ -1158,7 +1115,7 @@ int main(int argc, char *argv[])
         print_time(&s, &e);
         #endif
         check_error(cuda_err, (char *)"sort ents loop");
-        
+
         #ifdef PRINT_KERNEL_TIME
         clock_gettime(CLOCK_REALTIME, &s);
         #endif
@@ -1185,7 +1142,7 @@ int main(int argc, char *argv[])
     clock_gettime(CLOCK_REALTIME, &e_total);
     // print_csv(fpt, d_epos, d_emass, &h_ents_struct, n_ents);
     print_time(&s_total, &e_total);
-        
+
 
     fclose(fpt);
     cudaFreeHost(h_lepos);
