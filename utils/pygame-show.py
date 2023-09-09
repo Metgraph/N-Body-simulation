@@ -106,17 +106,20 @@ def play(
                         file=sys.stderr,
                     )
                     break
-            pygame.draw.circle(screen, col, (x, y), 3, width=0) # circonferenza
-            pygame.draw.circle(screen, (0, 0, 0), (x, y), 2, width=0) # interno
+            pygame.draw.circle(screen, col, (x, y), 1, width=0) # circonferenza
+            #pygame.draw.circle(screen, (0, 0, 0), (x, y), 2, width=0) # interno
 
-        # Aggiornamento del frame corrente
-        current_frame += 1
 
         # Aggiornamento della finestra di gioco
         pygame.display.flip()
 
         # Limitazione del framerate
         clock.tick(30*10)
+        # pygame.image.save(screen, f"images/2022-{current_frame}.png")
+
+        # Aggiornamento del frame corrente
+        current_frame += 1
+
 
     # Uscita dal gioco
     pygame.quit()
@@ -134,8 +137,8 @@ def main():
         width = int(sys.argv[2])
         height = int(sys.argv[3])
     else:
-        width = 1024
-        height = 768
+        width = 1024//2
+        height = 768//2
 
     data, n_corps = open_file(sys.argv[1])
     xs, ys, zs = prepare_coordinates(data, width, height)
