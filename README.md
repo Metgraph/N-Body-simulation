@@ -15,7 +15,9 @@ From a computational perspective, the simulation can require significant computa
 We present the solution to the problem using two types of algorithms.
 The first one, called exhaustive, computes the positions at time t+1 by calculating the interaction of each individual body with all others present in the system with time complexity $O(n^2)$.
 
-The second algorithm... continue...
+The second one, the Barnes-Hut algorithm, uses a tree data structure called a quadtree or octree depending on the number of children each node can have. With a quadtree, we can represent a two-dimensional space, while with an octree, a three-dimensional space.
+Each node of the tree represents a region of space and internally contains information about the bodies present in its subtree.<br>
+This algorithm has a known computational cost of $O(nlogn)$, which is lower than the exhaustive approach because during the calculation of interactions between bodies, those that are far away can be considered as a single, larger body, significantly reducing the number of calculations to be performed. The choice to make this approximation is determined by comparing it with a parameter THETA, which indicates whether the distance between the node containing the bodies is sufficient for approximation or if further refinement is necessary.
 
 <p align="center">
   <img src="./img/output_1500.gif" alt="1500 bodies simulation"/>
