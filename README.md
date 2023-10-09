@@ -26,7 +26,35 @@ In the __utils__ folder, you will find supporting Python codes such as the one f
 The _Makefile_ contains all the targets for compiling all the source code.
 
 ### Run The Code
-...
+Exhaustive serial
+```shell
+$ exh_serial input_filename start_time end_time delta_time output_filename
+```
+
+Exhaustive serial
+```shell
+$ exh_mp input_filename start_time end_time delta_time output_filename THREADS_NUM
+```
+
+Exhaustive CUDA
+```shell
+$ exh_cuda input_filename start_time end_time delta_time output_filename grid_size block_size
+```
+
+BarnesHut serial
+```shell
+$ barnes-hut input_filename start_time end_time delta_time output_filename
+```
+
+BarnesHut OpenMP
+```shell
+$ barnes-hut-omp input_filename start_time end_time delta_time output_filename THREADS_NUM
+```
+
+BarnesHut CUDA
+```shell
+$ barnes-hut-cuda input_filename start_time end_time delta_time output_filename [cache_sz_MB]
+```
 
 ### Code Formatting
 [Clang-format](https://clang.llvm.org/docs/ClangFormat.html) for c code (rules are in the root).\
@@ -44,7 +72,3 @@ python utils/pygame-show.py <file name>
 
 ## Perfomance analisys
 ...
-
-## TODO
-- [ ] Test cache miss performance: perf stat -d <./..>
-- [ ] Video
