@@ -17,6 +17,11 @@ The first one, called exhaustive, computes the positions at time t+1 by calculat
 
 The second algorithm... continue...
 
+<p align="center">
+  <img src="./img/output_1500.gif" alt="1500 bodies simulation"/>
+</p>
+
+
 ## Source code
 In the __serial__ folder, you will find the implementations of the two algorithms in a serial manner.
 
@@ -59,10 +64,6 @@ BarnesHut CUDA
 ```shell
 $ barnes-hut-cuda input_filename start_time end_time delta_time output_filename [cache_sz_MB]
 ```
-
-### Code Formatting
-[Clang-format](https://clang.llvm.org/docs/ClangFormat.html) for c code (rules are in the root).\
-[Black](https://github.com/psf/black) for python code.
 
 ## Video
 To display the output of a result graphically, you can use the command
