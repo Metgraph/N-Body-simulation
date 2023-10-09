@@ -1,6 +1,7 @@
 # N-body simulation
-<p>
-    <img src="img/output_500" alt="500 bodies simulation"/>
+
+<p align="center">
+  <img src="./img/output_500.gif" alt="500 bodies simulation"/>
 </p>
 
 An N-body simulation is a type of computational simulation used to study the motion and interaction of a large number of objects (referred to as bodies) in a three-dimensional space.
