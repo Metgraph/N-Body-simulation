@@ -75,4 +75,24 @@ python utils/pygame-show.py <file name>
 ```
 
 ## Perfomance analisys
-...
+
+Exhaustive time/speedup plots with 100, 1k, 10k, 100k bodies.
+<p align="center">
+  <img src="./img/exhaustive_analisys.png" alt="exhaustive analisys"/>
+</p>
+
+Exhaustive speedup/efficency 10k bodies test with 1, 2, 4, 6, 12, 24 threads on Core i5-11600K.
+<p align="center">
+  <img src="./img/exhaustive_speedup_efficency.png" alt="exhaustive openmp efficency"/>
+</p>
+
+Barnes-hut time/speedup plots with 100, 1k, 10k, 100k, 1M bodies.
+<p align="center">
+  <img src="./img/bh_analisys.png" alt="barnes-hut analisys"/>
+</p>
+
+Barnes-hut speedup/efficency 10k bodies test with 1, 2, 4, 6, 12, 24 threads on Core i5-11600K.
+<p align="center">
+  <img src="./img/bh_speedup_efficency.png" alt="barnes-hut openmp efficency"/>
+</p>
+
